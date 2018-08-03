@@ -1,0 +1,317 @@
+require("rjags")
+require("metRology")
+load.module("mix")
+options(stringsAsFactors = F)
+setwd(".")
+
+
+####For Methylation####
+
+
+####------------------THIS IS THE BAYESIAN MODEL--------------------####
+## 1. bimodal for methylation values modeled by mix of two beta distributions
+#model{
+#  # likelihood
+#  for (i in 1:nSample){
+#    methy[i] ~ dbeta(mu[clust[i]]*kappa,(1-mu[clust[i]])*kappa)
+#    clust[i] ~ dcat(pClust[1:2])
+#  }
+#  
+#  # prior
+#  kappa ~ dgamma(0.01,0.01)
+#  pClust[1] ~ dbeta(1,1)I(0.2,0.8)
+#  pClust[2] <- 1-pClust[1]
+#  mu[1] ~ dbeta(1,1)
+#  delta ~ dbeta(1,1)
+#  mu[2] <- min(1,delta + mu[1] + 0.1)
+#}
+
+## 2. unimodal for methylation values, modeled by one beta distribution
+#model{
+#  # likelihood
+#  for (i in 1:nSample){
+#    methy[i] ~ dbeta(a,b)
+#  }
+#  
+#  # prior
+#  a<- mu*kappa
+#  b<- (1-mu)*kappa
+#  mu ~ dbeta(1,1)
+#  kappa ~ dgamma(0.01,0.01)
+#}
+########## FUNCTION #############
+
+# Calculate BIC for minodal and bimodal
+BIC_one = function(model,data){
+  mu = model["mu"]
+  kappa = model["kappa"]
+  a = mu*kappa
+  b = (1-mu)*kappa
+  loglike = 0
+  for (i in data){
+    sub_like = log(dbeta(i,a,b))
+    loglike = loglike + sub_like
+  }
+  print(loglike)
+  bic = -2*loglike + 2*log(length(data))
+  bic
+}
+
+
+BIC_two = function(model,data){
+  mu1 = model["mu[1]"]
+  mu2 = model["mu[2]"]
+  kappa = model["kappa"]
+  a1 = mu1*kappa
+  b1 = (1-mu1)*kappa
+  a2 = mu2*kappa
+  b2 = (1-mu2)*kappa
+  p1 = model["pClust[1]"]
+  p2 = model["pClust[2]"]
+  
+  loglike = 0
+  for (i in data){
+    sub_like = log(p1*dbeta(i,a1,b1) + p2*dbeta(i,a2,b2))
+    loglike = loglike + sub_like
+  }
+  print(loglike)
+  bic = -2*loglike + 4*log(length(data))
+  bic
+}
+
+
+########DATA#######
+
+dat = read.table("DATA",sep=" ",header=T)
+cpg_unique = unique(dat[,1])
+cpg_unique_idx = match(cpg_unique,dat[,1])
+methy_mat_all = dat[cpg_unique_idx,c(77:150)]
+row.names(methy_mat_all) = cpg_unique
+methy_mat_all = as.matrix(methy_mat_all)
+methy_mat = methy_mat_all[start:end,]
+
+########RUN#######
+#---------------------Run the Chains-----------------------------
+adaptSteps = 5000              # Number of steps to "tune" the samplers.
+burnInSteps = 5000            # Number of steps to "burn-in" the samplers.
+nChains = 2                   # Number of chains to run.
+numSavedSteps=5000           # Total number of steps in chains to save.
+thinSteps=2                  # Number of steps to "thin" (1=keep every step).
+nIter = ceiling( ( numSavedSteps * thinSteps ) / nChains )
+#---------------------Parameters--------------
+two_parameters = c("mu","kappa","pClust")
+one_parameters = c("mu","kappa")
+#---------------------Data--------------------
+BIC = NULL
+two_all = NULL
+one_all = NULL
+
+for (i in 1:nrow(methy_mat)){
+  print(i)
+  # prepare dataList
+  cpg = rownames(methy_mat)[i]
+  methy = unname(methy_mat[i,])
+  methy = methy[!is.na(methy)]
+  methy = methy[methy>0]
+  nSample = length(methy)
+  clust = rep(NA,nSample)
+  
+  # two_mix                
+  two_dataList = list(nSample = nSample,
+                      methy = methy,
+                      clust = clust)
+  # one_mix
+  one_dataList = list(nSample = nSample,
+                      methy = methy)
+  
+  ## 1. bimodal
+  jagsModel_Two = jags.model( "TwoMixBeta.txt", 
+                              data=two_dataList, 
+                              n.chains=nChains, 
+                              n.adapt=adaptSteps)
+  update(jagsModel_Two,n.iter=burnInSteps)
+  codaSamples_Two = coda.samples( jagsModel_Two, 
+                                  variable.names=two_parameters, 
+                                  n.iter=nIter, thin=thinSteps)
+  
+  #gelman.diag(codaSamples_Two,multivariate=F)
+  Two_Beta = as.matrix(codaSamples_Two)
+  #summary(Two_Beta)
+  
+  ## 2. uni_normal
+  jagsModel_One = jags.model( "OneBeta.txt", 
+                              data=one_dataList, 
+                              n.chains=nChains, 
+                              n.adapt=adaptSteps)
+  update(jagsModel_One,n.iter=burnInSteps)
+  codaSamples_One = coda.samples( jagsModel_One, 
+                                  variable.names=one_parameters, 
+                                  n.iter=nIter, thin=thinSteps)
+  
+  #gelman.diag(codaSamples_One,multivariate=F)
+  One_Beta = as.matrix(codaSamples_One)
+  #summary(One_Beta)
+  
+  ## bind to mat
+  sub_two = apply(Two_Beta,2,mean)
+  sub_one = apply(One_Beta,2,mean)
+  
+  bic_one = BIC_one(sub_one,methy)
+  bic_two = BIC_two(sub_two,methy)
+  sub_bic = c(bic_two,bic_one)
+  names(sub_bic) = c("Two_Beta","One_Beta")
+  BIC = rbind(BIC,sub_bic)
+  
+  two_all = rbind(two_all,sub_two)
+  one_all = rbind(one_all,sub_one)
+  
+  ## plot the data and the model
+  pdf(paste0("plot/methy_new/",cpg,".pdf"),width=5,height=4)
+  hist(methy,breaks=seq(0,1,0.02),xlim=c(0,1),prob=T,main=cpg)
+  # one beta
+  curve(dbeta(x,sub_one["mu"]*sub_one["kappa"],(1-sub_one["mu"])*sub_one["kappa"]),
+        xlim=c(0,1),col="blue",add=T,lwd=1)
+  
+  # two beta
+  curve(sub_two["pClust[1]"]*dbeta(x,sub_two["mu[1]"]*sub_two["kappa"],(1-sub_two["mu[1]"])*sub_two["kappa"]),
+        xlim=c(0,1),col="red",add=T,lwd=1)
+  curve(sub_two["pClust[2]"]*dbeta(x,sub_two["mu[2]"]*sub_two["kappa"],(1-sub_two["mu[2]"])*sub_two["kappa"]),
+        xlim=c(0,1),col="red",add=T,lwd=1)
+  dev.off()
+}
+  
+rownames(BIC) = rownames(methy_mat)
+rownames(two_all) = rownames(methy_mat)
+rownames(one_all) = rownames(methy_mat)
+
+write.table(BIC,file=paste0("methy_new/BIC_Methy",start,"_",end,".txt"),sep="\t",quote = F,col.names = T,row.names = T)
+write.table(two_all,file=paste0("methy_new/two_Methy",start,"_",end,".txt"),sep="\t",quote = F,col.names = T,row.names = T)
+write.table(one_all,file=paste0("methy_new/one_Methy",start,"_",end,".txt"),sep="\t",quote = F,col.names = T,row.names = T)
+
+
+####For expression####
+
+#-----------------DATA---------------------
+dat = read.table("DATASET_YU_042517.txt",sep=" ",header=T)
+gene_unique = unique(dat[,2])
+gene_unique_idx = match(gene_unique,dat[,2])
+exp_mat = dat[gene_unique_idx,c(3:76)]
+row.names(exp_mat) = gene_unique
+exp_mat = as.matrix(exp_mat)
+
+####------------------THIS IS THE BAYESIAN MODEL--------------------####
+## 1. bimodal model for expression data
+# model{
+#   # likelihood
+#   for (i in 1:nSample){
+#     exp[i] ~ dnorm(mu[clust[i]],tau)
+#     clust[i] ~ dcat(pClust[1:2])
+#   }
+# 
+#   # prior
+#   tau ~ dgamma(0.01,0.01)
+#   pClust[1] ~ dbeta(1,1)I(0.1,1)
+#   pClust[2] <- 1-pClust[1]
+#   mu[1] ~ dnorm(0,0.1)I(0,)
+#   delta ~ dbeta(1,1)I(0.1,1)
+#   mu[2] <- delta*max(exp)+mu[1]
+# }
+
+## 2-1. unimodal model for expression data (normal distribution)
+# model{
+#   # likelihood
+#   for (i in 1:nSample){
+#     exp[i] ~ dnorm(mu,tau)
+#   }
+#   
+#   # prior
+#   tau ~ dgamma(0.01,0.01)
+#   mu ~ dnorm(0,0.1)I(0,)
+# }
+
+###### FUNCTION for BIC########---------------
+
+# function to calculate BIC from posterior distribution
+BIC_normal = function(model,data){
+  mu = model["mu"]
+  tau = model["tau"]
+  sd = 1/sqrt(tau)
+  loglike = 0
+  for (i in data){
+    sub_like = log(dnorm(i,mu,sd))
+    loglike = loglike + sub_like
+  }
+  #print(loglike)
+  bic = -2*loglike + 2*log(length(data))
+  bic
+}
+
+
+BIC_bimodal = function(model,data){
+  mu1 = model["mu[1]"]
+  mu2 = model["mu[2]"]
+  tau = model["tau"]
+  sd = 1/sqrt(tau)
+  p1 = model["pClust[1]"]
+  p2 = model["pClust[2]"]
+  
+  loglike = 0
+  for (i in data){
+    sub_like = log(p1*dnorm(i,mu1,sd) + p2*dnorm(i,mu2,sd))
+    loglike = loglike + sub_like
+  }
+  #print(loglike)
+  bic = -2*loglike + 4*log(length(data))
+  bic
+}
+
+
+###unimodal_normal.txt###
+
+model{
+  # likelihood
+  for (i in 1:nSample){
+    exp[i] ~ dnorm(mu,tau)
+  }
+  
+  # prior
+  tau ~ dgamma(0.01,0.01)
+  mu ~ dnorm(0,0.1)I(0,)
+}
+
+
+###TwoMixBeta.txt###
+
+model{
+  # likelihood
+  for (i in 1:nSample){
+    methy[i] ~ dbeta(mu[clust[i]]*kappa,(1-mu[clust[i]])*kappa)
+    clust[i] ~ dcat(pClust[1:2])
+  }
+
+  # prior
+  kappa ~ dgamma(0.01,0.01)
+  pClust[1] ~ dbeta(1,1)I(0.2,0.8)
+  pClust[2] <- 1-pClust[1]
+  mu[1] ~ dbeta(1,1)
+  delta ~ dbeta(1,1)
+  mu[2] <- min(1,delta + mu[1] + 0.1)
+}
+
+###TwoMixExp.txt###
+
+model{
+  # likelihood
+  for (i in 1:nSample){
+    exp[i] ~ dnorm(mu[clust[i]],tau)
+    clust[i] ~ dcat(pClust[1:2])
+  }
+
+  # prior
+  tau ~ dgamma(0.01,0.01)
+  pClust[1] ~ dbeta(1,1)I(0.1,0.9)
+  pClust[2] <- 1-pClust[1]
+  mu[1] ~ dnorm(0,0.1)I(0,)
+  delta ~ dnorm(0,0.1)I(0,)
+  mu[2] <- delta + 1.1*mu[1]
+}

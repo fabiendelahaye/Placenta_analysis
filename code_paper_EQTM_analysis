@@ -1,0 +1,338 @@
+---
+title: "Analysis of eQTM"
+output:
+  pdf_document: default
+  html_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+### I run matrixEQTL to identify association between gene and CpGs using the linear model
+
+
+```{r}
+
+options(stringsAsFactors=F)
+library('MatrixEQTL')
+
+# Linear model to use, modelANOVA, modelLINEAR, or modelLINEAR_CROSS
+useModel = modelLINEAR; #modelANOVA, modelLINEAR, or modelLINEAR_CROSS
+
+
+# Error covariance matrix
+# Set to numeric() for identity.
+errorCovariance = numeric();
+
+# Distance for local gene-SNP pairs
+cisDist = 1e5;
+
+# Output file name
+    output_file_name_cis = tempfile();
+    output_file_name_tra = tempfile();
+
+# Only associations significant at this level will be saved
+    pvOutputThreshold_cis = 1e-2;
+    pvOutputThreshold_tra = 0;
+
+## Load genotype data
+## Load genotype data
+
+snps = SlicedData$new();
+snps$fileDelimiter = "\t";      # the TAB character
+snps$fileOmitCharacters = "NA"; # denote missing values;
+snps$fileSkipRows = 1;          # one row of column labels
+snps$fileSkipColumns = 1;       # one column of row labels
+snps$fileSliceSize = 2000;      # read file in slices of 2,000 rows
+snps$LoadFile("methylation_dataset");
+
+## Load gene expression data
+
+gene = SlicedData$new();
+gene$fileDelimiter = "\t";      # the TAB character
+gene$fileOmitCharacters = "NA"; # denote missing values;
+gene$fileSkipRows = 1;          # one row of column labels
+gene$fileSkipColumns = 1;       # one column of row labels
+gene$fileSliceSize = 2000;      # read file in slices of 2,000 rows
+gene$LoadFile("expression_dataset");
+
+## Load covariates
+
+cvrt = SlicedData$new();
+cvrt$fileDelimiter = "\t";      # the TAB character
+cvrt$fileOmitCharacters = "NA"; # denote missing values;
+cvrt$fileSkipRows = 0;          # one row of column labels
+cvrt$fileSkipColumns = 0;       # one column of row labels
+cvrt$LoadFile("covariantes_dataset");
+
+
+
+## Run the analysis
+
+snpspos = read.table("CpG_probe_position", header = TRUE, stringsAsFactors = FALSE);
+genepos = read.table("gene_position", header = TRUE, stringsAsFactors = FALSE);
+
+eq = Matrix_eQTL_main(
+snps = snps,
+gene = gene,
+cvrt = cvrt,
+output_file_name = output_file_name_tra,
+pvOutputThreshold = pvOutputThreshold_tra,
+useModel = useModel,
+errorCovariance = errorCovariance,
+verbose = TRUE,
+output_file_name.cis = output_file_name_cis,
+pvOutputThreshold.cis = pvOutputThreshold_cis,
+snpspos = snpspos,
+genepos = genepos,
+cisDist = cisDist,
+pvalue.hist = TRUE,
+min.pv.by.genesnp = FALSE,
+noFDRsaveMemory = FALSE);
+
+unlink(output_file_name_tra);
+unlink(output_file_name_cis);
+
+finalcis=(eq$cis$eqtls)
+finaltrans=(eq$trans$eqtls)
+
+dfFull = eq$param$dfFull
+tstat = eq$cis$eqtls$statistic
+r = tstat / sqrt( dfFull + tstat^2 )
+
+final=data.frame(finalcis,r)
+
+write.table(final,"eQTM_matrixEQTL_output.txt",sep="\t",col.names=T,row.names=F,quote=F)
+
+```
+
+### I need to run permutation to assess significance of the associations. I run 1000 permutations. 
+
+To make the permutation less intensive I filter expression and methylation dataset to keep only gene and CpG previously identified as eQTM
+
+```{r}
+
+options(stringsAsFactors=F)
+library('MatrixEQTL')
+
+exp=read.table("expression_dataset_for_gene_in_eQTM.txt")
+exp2=exp[,-1]
+
+
+# Linear model to use, modelANOVA, modelLINEAR, or modelLINEAR_CROSS
+useModel = modelLINEAR; #modelANOVA, modelLINEAR, or modelLINEAR_CROSS
+
+
+# Error covariance matrix
+# Set to numeric() for identity.
+errorCovariance = numeric();
+
+# Distance for local gene-SNP pairs
+cisDist = 1e5;
+
+# Output file name
+    output_file_name_cis = tempfile();
+    output_file_name_tra = tempfile();
+
+# Only associations significant at this level will be saved
+    pvOutputThreshold_cis = 1e-2;
+    pvOutputThreshold_tra = 0;
+
+
+## Load genotype data
+
+snps = SlicedData$new();
+snps$fileDelimiter = "\t";      # the TAB character
+snps$fileOmitCharacters = "NA"; # denote missing values;
+snps$fileSkipRows = 0;          # one row of column labels
+snps$fileSkipColumns = 1;       # one column of row labels
+snps$fileSliceSize = 2000;      # read file in slices of 2,000 rows
+snps$LoadFile("methylation_dataset_for_CpG_in_eQTM.txt");
+
+snpspos = read.table("position_for_CpG_in_eQTM.txt", header = FALSE, stringsAsFactors = FALSE);
+genepos = read.table("position_for_gene_in_eQTM.txt", header = FALSE, stringsAsFactors = FALSE);
+
+for(j in c(1:10)){
+
+for(i in c(1:100)){
+
+##Here I create the random expresion profile for permutations
+x=sample(1:74,74,replace=F)
+exp2=as.matrix(exp2[,x])
+rownames(exp2)=exp[,1]
+
+## Load gene expression data
+
+gene = SlicedData$new();
+gene$CreateFromMatrix(exp2)
+gene$fileDelimiter = "\t";      # the TAB character
+gene$fileOmitCharacters = "NA"; # denote missing values;
+gene$fileSkipRows = 0;          # one row of column labels
+gene$fileSkipColumns = 0;       # one column of row labels
+gene$fileSliceSize = 2000;      # read file in slices of 2,000 rows
+gene$ResliceCombined();
+
+## Load covariates
+
+
+cov=read.table("covariantes_dataset_expression.txt")
+cov2=as.matrix(cov[,x]) #same order than random sampling above
+
+cvrt = SlicedData$new();
+cvrt$CreateFromMatrix(cov2)
+cvrt$fileDelimiter = "\t";      # the TAB character
+cvrt$fileOmitCharacters = "NA"; # denote missing values;
+cvrt$fileSkipRows = 0;          # one row of column labels
+cvrt$fileSkipColumns = 0;       # one column of row labels
+cvrt$ResliceCombined();
+
+
+eq = Matrix_eQTL_main(
+snps = snps,
+gene = gene,
+cvrt = cvrt,
+output_file_name = output_file_name_tra,
+pvOutputThreshold = pvOutputThreshold_tra,
+useModel = useModel,
+errorCovariance = errorCovariance,
+verbose = TRUE,
+output_file_name.cis = output_file_name_cis,
+pvOutputThreshold.cis = pvOutputThreshold_cis,
+snpspos = snpspos,
+genepos = genepos,
+cisDist = cisDist,
+pvalue.hist = TRUE,
+min.pv.by.genesnp = FALSE,
+noFDRsaveMemory = FALSE);
+
+final=(eq$cis$eqtls)
+
+
+split=split(final,final[,2])
+
+a=lapply(split,function(x){
+z=x[order(x[,4]),]
+z=data.frame(z[1,2],z[1,4],z[1,5])
+return(z)})
+
+x=do.call(mapply, c(rbind,a))
+
+write.table(x,paste("output_matrixEQTL",j,"permutation.txt",sep=""),sep="\t",col.names=F,row.names=F,append=T)
+
+rm(x)
+rm(final)
+gc()
+}
+}
+
+
+#here I keep the stronger pvalue for each association
+
+for (z in c(1:10)){
+print(z)
+x=read.table(paste("output_matrixEQTL",j,"permutation.txt",sep=""),sep="\t",header=F)
+split=split(x,x[,1])
+a=lapply(split,function(x){
+z=x[order(x[,2]),]
+return(z[1,])})
+
+final=do.call(mapply, c(rbind,a))
+
+write.table(final,"final_output_100_permutations.txt",sep="\t",col.names=F,row.names=F,append=T,quote=F)
+rm(x)
+rm(final)
+gc()
+}
+
+
+x=read.table("final_output_100_permutations.txt",sep="\t")
+
+split=split(x,x[,1])
+
+a=lapply(split,function(x){
+z=x[order(x[,2]),]
+return(z[1,])})
+
+final=do.call(mapply, c(rbind,a))
+
+write.table(final,"final_output_1000_permutations.txt",sep="\t",col.names=F,row.names=F,append=T,quote=F)
+
+```
+
+###ANALYSIS
+I need to filter based on permutations. 
+
+```{r}
+
+metex=read.table("eQTM_matrixEQTL_output.txt",header=T)
+
+FDR=read.table("final_output_1000_permutations.txt")
+
+#I generate the adjusted p.value
+FDR=data.frame(FDR[,1],p.adjust(FDR[,2],method="fdr"))
+
+metexfdr=merge(metex,FDR,by.x=2,by.y=1)
+
+final=metexfdr[which(as.numeric(metexfdr[,4])<as.numeric(metexfdr[,8])),]
+```
+I need to filter for at risk probe and cross reactive probe and exclude associations within chrX and chrY. 
+
+From them I created two datasets based on positive and negative correlation and look for enrichment for feature, Refseq annotation and transcription factors using the permutation approach detailed in EQTL and MQTL analysis. Here I will just detailed the transcription factor permutation as it was not describe before. 
+
+```{r}
+
+data=read.table("filter_eQTM.txt",sep="\t")
+data=data.frame(data[,9:10],data[,10]+1,data[,1:7],data[,10]-data[,12])
+
+TF=read.table("TFBS_list_all_tissue.txt",header=F) #from ENCODE factorbook
+
+ill=read.table("Interrogated_CpG_list_for_450K_Illumina.txt",sep="\t")
+
+#the function below call bedTools intersect within R
+bedTools.2in<-function(functionstring="/public/apps/bedtools2/2.24.0/gcc.4.4.7/bin/intersectBed",bed1,bed2,opt.string="")
+{
+  #create temp files
+  a.file=tempfile()
+  b.file=tempfile()
+  out   =tempfile()
+  options(scipen =99) # not to use scientific notation when writing out
+ 
+  #write bed formatted dataframes to tempfile
+  write.table(bed1,file=a.file,quote=F,sep="\t",col.names=F,row.names=F)
+  write.table(bed2,file=b.file,quote=F,sep="\t",col.names=F,row.names=F)
+ 
+  # create the command string and call the command using system()
+  command=paste(functionstring,"-a",a.file,"-b",b.file,opt.string,">",out,sep=" ")
+  cat(command,"\n")
+  try(system(command))
+ 
+  res=read.table(out,header=F)
+  unlink(a.file);unlink(b.file);unlink(out)
+  return(res)
+}
+
+
+##look at % for TF overlapping with SNP - interrogated TF site
+
+all=bedTools.2in(bed1=ill[,1:3],bed2=TF,opt.string="-wa -wb")
+
+#select for associations with in 10KB 
+
+data10=data[which(abs(as.numeric(data[,11]))<10000),]
+
+interTF=bedTools.2in(bed1=data10[,1:3],bed2=TF,opt.string="-wa -wb")
+count=data.frame(table(interTF[,7]))
+
+write.table(count,"TFBBS_overlap_eQTM.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+
+####permutation
+
+for (i in c(1:1000)) { 
+print(i)
+x=sample(1:nrow(all),nrow(interTF),replace=F)
+a=all[x,]
+final=data.frame(table(a[,7]))
+write.table(final,"permutations_TFBS_overlap_eQTL.txt",quote=F,sep="\t",col.names=F,row.names=F,append=T)
+}
+
+```

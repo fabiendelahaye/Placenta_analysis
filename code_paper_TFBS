@@ -1,0 +1,915 @@
+---
+title: "Transcription Factor bindind site Analysis - Placenta EQTL/MEQTL"
+output:
+  pdf_document: default
+  html_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+## Outlines of the analysis
+
+Here I am interested in evaluating the impact of SNP on binding ability for the different transcription factor (TF) present in the ENCODE datasets. 
+
+The list of targets come from the SNP associated to EQTL/MEQTL analysis,  and I also collected SNP (MAF>1%) within a 2kb window from TSS of genes or CpG associated with genetic variants based on the 1000 genomes project reference database. 
+
+#I need to create a file with each SNP and associated genoytpe and also file with list of SNP within the 2kb window.
+
+```{r}
+
+eqtl=read.table("EQTL_filternumber_geno_expression_score.txt",header=T)
+
+mqtl=read.table("MQTL_filternumber_geno_methylation_score_gene.txt",header=T)
+
+
+snpmap=read.table("SNP_Map.txt",header=T,sep="\t") #from Illumina Omni 2.5
+
+bed1=data.frame(paste("chr",eqtl[,9],sep=""),eqtl[,10],eqtl[,10]+1,eqtl[,8],eqtl[,1])
+
+bed3=data.frame(paste("chr",mqtl[,9],sep=""),mqtl[,10],mqtl[,10]+1,mqtl[,2],mqtl[,1])
+
+bedTools.2in<-function(functionstring="/public/apps/bedtools2/2.24.0/gcc.4.4.7/bin/intersectBed",bed1,bed2,opt.string="")
+{
+  #create temp files
+  a.file=tempfile()
+  b.file=tempfile()
+  out   =tempfile()
+  options(scipen =99) # not to use scientific notation when writing out
+ 
+  #write bed formatted dataframes to tempfile
+  write.table(bed1,file=a.file,quote=F,sep="\t",col.names=F,row.names=F)
+  write.table(bed2,file=b.file,quote=F,sep="\t",col.names=F,row.names=F)
+ 
+  # create the command string and call the command using system()
+  command=paste(functionstring,"-a",a.file,"-b",b.file,opt.string,">",out,sep=" ")
+  cat(command,"\n")
+  try(system(command))
+ 
+  res=read.table(out,header=F)
+  unlink(a.file);unlink(b.file);unlink(out)
+  return(res)
+}
+
+bed2=read.table("/home/delahaye/data_from_home/output/PLACENTA/SNP/MATRIX_092016/list_MAF0.01_phase3_REF_040317.txt",header=T,nrow=5000000)
+
+bed2=data.frame(paste("chr",bed2[,1],sep=""),bed2[,2],bed2[,2]+1,bed2[,3:5])
+
+final1=bedTools.2in(bed1=bed1,bed2=bed2, opt.string="-wa -wb")
+final1me=bedTools.2in(bed1=bed3,bed2=bed2, opt.string="-wa -wb")
+
+bed2=read.table("/home/delahaye/data_from_home/output/PLACENTA/SNP/MATRIX_092016/list_MAF0.01_phase3_REF_040317.txt",skip=5000000, nrow=5000000)
+
+bed2=data.frame(paste("chr",bed2[,1],sep=""),bed2[,2],bed2[,2]+1,bed2[,3:5])
+
+final2=bedTools.2in(bed1=bed1,bed2=bed2, opt.string="-wa -wb")
+final2me=bedTools.2in(bed1=bed3,bed2=bed2, opt.string="-wa -wb")
+
+bed2=read.table("/home/delahaye/data_from_home/output/PLACENTA/SNP/MATRIX_092016/list_MAF0.01_phase3_REF_040317.txt",skip=10000000)
+
+bed2=data.frame(paste("chr",bed2[,1],sep=""),bed2[,2],bed2[,2]+1,bed2[,3:5])
+
+final3=bedTools.2in(bed1=bed1,bed2=bed2, opt.string="-wa -wb")
+final3me=bedTools.2in(bed1=bed3,bed2=bed2, opt.string="-wa -wb")
+
+colnames(final2)=colnames(final1)
+colnames(final3)=colnames(final1)
+
+final=rbind(final1,final2,final3)
+
+
+write.table(final,"eqtlsnp_placenta.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+colnames(final2me)=colnames(final1me)
+colnames(final3me)=colnames(final1me)
+
+finalme=rbind(final1me,final2me,final3me)
+
+mqtl=finalme
+eqtl=final
+
+mqtl=data.frame(mqtl[,1:4],mqtl[10:11],mqtl[,5],mqtl[,9])
+write.table(mqtl,"meqtlsnp_placenta.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+
+eqtl=data.frame(eqtl[,1:4],eqtl[10:11],eqtl[,5],eqtl[,9])
+write.table(eqtl,"eqtlsnp_placenta.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+'''
+
+###For window approach I repeat above changing the coordinate as bellow
+
+```{r}
+
+bed1=data.frame(paste("chr",eqtl[,9],sep=""),eqtl[,10]-1000,eqtl[,10]+1000,eqtl[,8],eqtl[,1])
+
+bed3=data.frame(paste("chr",mqtl[,9],sep=""),mqtl[,10]-1000,mqtl[,10]+1000,mqtl[,2],mqtl[,1])
+
+[...]
+
+write.table(eqtlw,"eqtlwindow_placenta.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+write.table(mqtlw,"mqtlwindow_placenta.txt",sep="\t",col.names=F,row.names=F,quote=F)
+'''
+
+### I need to intersect my file with DNASE to keep only SNP that are in open chromatin
+
+[in terminal]
+
+intersectBed -a 'eqtlsnp_placenta.txt' -b '/home/delahaye/data_from_home/output/PLACENTA/SNP/TF_CATH/wgEncodeRegDnaseClusteredV3.bed' -wa -wb > eqtlsnp_DNASE_placenta.txt
+
+intersectBed -a 'mqtlsnp_placenta.txt' -b '/home/delahaye/data_from_home/output/PLACENTA/SNP/TF_CATH/wgEncodeRegDnaseClusteredV3.bed' -wa -wb > mqtlsnp_DNASE_placenta.txt
+
+intersectBed -a 'eqtlwindow_placenta.txt' -b '/home/delahaye/data_from_home/output/PLACENTA/SNP/TF_CATH/wgEncodeRegDnaseClusteredV3.bed' -wa -wb > eqtlwindow_DNASE_placenta.txt
+
+intersectBed -a 'mqtlwindow_placenta.txt' -b '/home/delahaye/data_from_home/output/PLACENTA/SNP/TF_CATH/wgEncodeRegDnaseClusteredV3.bed' -wa -wb > mqtlwindow_DNASE_placenta.txt
+
+
+### I need to create a window surrounding your target to later use FIMO, here I choose 20 bp upstream and for downstream I look for the greater deletion +20, here 100bp to be sure to have the 20bp downstream.
+
+awk 'BEGIN{FS=OFS="\t"} {print $1, $2-20,$2+100,$4}'  eqtlsnp_DNASE_placenta.txt > eqtlsnp_DNASE_placenta_40bp.bed
+
+awk 'BEGIN{FS=OFS="\t"} {print $1, $2-20,$2+100,$4}'  eqtlsnp_window_DNASE_placenta.txt > eqtlsnp_window_DNASE_placenta_40bp.bed
+
+awk 'BEGIN{FS=OFS="\t"} {print $1, $2-20,$2+100,$4}'  meqtlsnp_DNASE_placenta.txt > meqtlsnp_DNASE_placenta_40bp.bed
+
+awk 'BEGIN{FS=OFS="\t"} {print $1, $2-20,$2+100,$4}'  meqtlsnp_window_DNASE_placenta.txt > meqtlsnp_window_DNASE_placenta_40bp.bed
+
+
+### I need to take out "chr" 
+
+sed 's/chr//g' meqtlsnp_window_DNASE_placenta_40bp.bed > meqtlsnp_window_DNASE_placenta_formatted_40bp.bed
+
+sed 's/chr//g' eqtlsnp_window_DNASE_placenta_40bp.bed > eqtlsnp_window_DNASE_placenta_formatted_40bp.bed
+
+sed 's/chr//g' meqtlsnp_DNASE_placenta_40bp.bed > meqtlsnp_DNASE_placenta_formatted_40bp.bed
+
+sed 's/chr//g' eqtlsnp_DNASE_placenta_40bp.bed > eqtlsnp_DNASE_placenta_formatted_40bp.bed
+
+### I need to get the fasta sequence for each file 
+
+bedtools getfasta -fi '/home/delahaye/data_from_home/output/PLACENTA/SNP/TF_CATH/hg19_2.fa'  -bed   eqtlsnp_DNASE_placenta_formatted_40bp.bed -fo   eqtlsnp_DNASE_placenta_formatted_40bp_ref.txt -name -tab
+
+bedtools getfasta -fi '/home/delahaye/data_from_home/output/PLACENTA/SNP/TF_CATH/hg19_2.fa'  -bed   eqtlsnp_window_DNASE_placenta_formatted_40bp.bed -fo   eqtlsnp_window_DNASE_placenta_formatted_40bp_ref.txt -name -tab
+
+bedtools getfasta -fi '/home/delahaye/data_from_home/output/PLACENTA/SNP/TF_CATH/hg19_2.fa'  -bed   meqtlsnp_DNASE_placenta_formatted_40bp.bed -fo   meqtlsnp_DNASE_placenta_formatted_40bp_ref.txt -name -tab
+
+bedtools getfasta -fi '/home/delahaye/data_from_home/output/PLACENTA/SNP/TF_CATH/hg19_2.fa'  -bed   meqtlsnp_window_DNASE_placenta_formatted_40bp.bed -fo   meqtlsnp_window_DNASE_placenta_formatted_40bp_ref.txt -name -tab
+
+### I need to create the files with alternative sequence using R
+
+```{r}
+
+#eqtlsnp
+
+data=read.table("eqtlsnp_DNASE_placenta_formatted_40bp_ref.txt") #files with FASTA sequence 
+
+data2=read.table("eqtlsnp_DNASE_placenta.txt") #file with alt sequence 
+
+m=merge(data,data2,by.x=1,by.y=4)
+m=m[!duplicated(m[,1]),]
+split=split(m,m[,1])
+
+seq=lapply(split,function(x){
+a=strsplit(x[,2],"")
+b=unlist(a)
+up=paste(b[1:19],collapse="")#here 19 stand for 19bp before and after the considered base
+snp=x[,7]
+start=20+nchar(x[,6])
+stop=38+nchar(x[,6])
+down=paste(b[start:stop],collapse="")
+all=paste(up,snp,down,collaspe="")
+all<-as.data.frame(sapply(all,gsub,pattern=" ",replacement=""))
+all=data.frame(paste(paste(paste(x[,1],x[,3],sep="::"),x[,4],sep=":"),x[,5],sep="-"),all[,1])
+return(all)})
+
+
+final=lapply(seq,function(y){
+ya=strsplit(y[,2],"")
+yb=unlist(ya)
+yc=paste(yb[1:39],collapse="")
+yd=data.frame(y[,1],yc)
+return(yd)})
+
+final=do.call(rbind,final)
+ 
+write.table(final,"eqtlsnp_DNASE_placenta_formatted_40bp_alt.txt",sep="\t",quote=F,col.names=F,row.names=F)
+
+
+#you need to adjust to 19bp up and down in the reference file as well
+ 
+ref=data.frame(paste(paste(paste(m[,1],m[,3],sep="::"),m[,4],sep=":"),m[,5],sep="-"),m[,2])
+ 
+seq=split(ref,ref[,1]) 
+
+final=lapply(seq,function(y){
+ya=strsplit(y[,2],"")
+yb=unlist(ya)
+yc=paste(yb[1:39],collapse="")
+yd=data.frame(y[,1],yc)
+return(yd)})
+
+
+final=do.call(rbind,final)
+
+write.table(final,"eqtlsnp_DNASE_placenta_formatted_40bp_ref.txt",sep="\t",quote=F,col.names=F,row.names=F)
+
+#mqtlsnp
+
+data=read.table("meqtlsnp_DNASE_placenta_formatted_40bp_ref.txt") #files with FASTA sequence 
+
+data2=read.table("meqtlsnp_DNASE_placenta.txt") #file with alt sequence 
+
+m=merge(data,data2,by.x=1,by.y=4)
+m=m[!duplicated(m[,1]),]
+split=split(m,m[,1])
+
+seq=lapply(split,function(x){
+a=strsplit(x[,2],"")
+b=unlist(a)
+up=paste(b[1:19],collapse="")#here 19 stand for 19bp before and after the considered base
+snp=x[,7]
+start=20+nchar(x[,6])
+stop=38+nchar(x[,6])
+down=paste(b[start:stop],collapse="")
+all=paste(up,snp,down,collaspe="")
+all<-as.data.frame(sapply(all,gsub,pattern=" ",replacement=""))
+all=data.frame(paste(paste(paste(x[,1],x[,3],sep="::"),x[,4],sep=":"),x[,5],sep="-"),all[,1])
+return(all)})
+
+
+final=lapply(seq,function(y){
+ya=strsplit(y[,2],"")
+yb=unlist(ya)
+yc=paste(yb[1:39],collapse="")
+yd=data.frame(y[,1],yc)
+return(yd)})
+
+final=do.call(rbind,final)
+ 
+write.table(final,"meqtlsnp_DNASE_placenta_formatted_40bp_alt.txt",sep="\t",quote=F,col.names=F,row.names=F)
+
+
+#you need to adjust to 19bp up and down in the reference file as well
+ 
+ref=data.frame(paste(paste(paste(m[,1],m[,3],sep="::"),m[,4],sep=":"),m[,5],sep="-"),m[,2])
+ 
+seq=split(ref,ref[,1]) 
+
+final=lapply(seq,function(y){
+ya=strsplit(y[,2],"")
+yb=unlist(ya)
+yc=paste(yb[1:39],collapse="")
+yd=data.frame(y[,1],yc)
+return(yd)})
+
+
+final=do.call(rbind,final)
+
+write.table(final,"meqtlsnp_DNASE_placenta_formatted_40bp_ref.txt",sep="\t",quote=F,col.names=F,row.names=F)
+
+#eqtl window
+
+data=read.table("eqtlsnp_window_DNASE_placenta_formatted_40bp_ref.txt") #files with FASTA sequence 
+
+data2=read.table("eqtlsnp_window_DNASE_placenta.txt") #file with alt sequence 
+
+m=merge(data,data2,by.x=1,by.y=4)
+m=m[!duplicated(m[,1]),]
+split=split(m,m[,1])
+
+seq=lapply(split,function(x){
+a=strsplit(x[,2],"")
+b=unlist(a)
+up=paste(b[1:19],collapse="")#here 19 stand for 19bp before and after the considered base
+snp=x[,7]
+start=20+nchar(x[,6])
+stop=38+nchar(x[,6])
+down=paste(b[start:stop],collapse="")
+all=paste(up,snp,down,collaspe="")
+all<-as.data.frame(sapply(all,gsub,pattern=" ",replacement=""))
+all=data.frame(paste(paste(paste(x[,1],x[,3],sep="::"),x[,4],sep=":"),x[,5],sep="-"),all[,1])
+return(all)})
+
+
+final=lapply(seq,function(y){
+ya=strsplit(y[,2],"")
+yb=unlist(ya)
+yc=paste(yb[1:39],collapse="")
+yd=data.frame(y[,1],yc)
+return(yd)})
+
+final=do.call(rbind,final)
+ 
+write.table(final,"eqtlsnp_window_DNASE_placenta_formatted_40bp_alt.txt",sep="\t",quote=F,col.names=F,row.names=F)
+
+#you need to adjust to 19bp up and down in the reference file as well
+ 
+ref=data.frame(paste(paste(paste(m[,1],m[,3],sep="::"),m[,4],sep=":"),m[,5],sep="-"),m[,2])
+ 
+seq=split(ref,ref[,1]) 
+
+final=lapply(seq,function(y){
+ya=strsplit(y[,2],"")
+yb=unlist(ya)
+yc=paste(yb[1:39],collapse="")
+yd=data.frame(y[,1],yc)
+return(yd)})
+
+
+final=do.call(rbind,final)
+
+write.table(final,"eqtlsnp_window_DNASE_placenta_formatted_40bp_ref.txt",sep="\t",quote=F,col.names=F,row.names=F)
+
+#mqtl window
+
+data=read.table("meqtlsnp_window_DNASE_placenta_formatted_40bp_ref.txt") #files with FASTA sequence 
+
+data2=read.table("meqtlsnp_window_DNASE_placenta.txt") #file with alt sequence 
+
+m=merge(data,data2,by.x=1,by.y=4)
+m=m[!duplicated(m[,1]),]
+split=split(m,m[,1])
+
+seq=lapply(split,function(x){
+a=strsplit(x[,2],"")
+b=unlist(a)
+up=paste(b[1:19],collapse="")#here 19 stand for 19bp before and after the considered base
+snp=x[,7]
+start=20+nchar(x[,6])
+stop=38+nchar(x[,6])
+down=paste(b[start:stop],collapse="")
+all=paste(up,snp,down,collaspe="")
+all<-as.data.frame(sapply(all,gsub,pattern=" ",replacement=""))
+all=data.frame(paste(paste(paste(x[,1],x[,3],sep="::"),x[,4],sep=":"),x[,5],sep="-"),all[,1])
+return(all)})
+
+
+final=lapply(seq,function(y){
+ya=strsplit(y[,2],"")
+yb=unlist(ya)
+yc=paste(yb[1:39],collapse="")
+yd=data.frame(y[,1],yc)
+return(yd)})
+
+final=do.call(rbind,final)
+ 
+write.table(final,"meqtlsnp_window_DNASE_placenta_formatted_40bp_alt.txt",sep="\t",quote=F,col.names=F,row.names=F)
+
+
+#you need to adjust to 19bp up and down in the reference file as well
+ 
+ref=data.frame(paste(paste(paste(m[,1],m[,3],sep="::"),m[,4],sep=":"),m[,5],sep="-"),m[,2])
+ 
+seq=split(ref,ref[,1]) 
+
+final=lapply(seq,function(y){
+ya=strsplit(y[,2],"")
+yb=unlist(ya)
+yc=paste(yb[1:39],collapse="")
+yd=data.frame(y[,1],yc)
+return(yd)})
+
+
+final=do.call(rbind,final)
+
+write.table(final,"meqtlsnp_window_DNASE_placenta_formatted_40bp_ref.txt",sep="\t",quote=F,col.names=F,row.names=F)
+
+'''
+
+### I need to create fasta file for each file
+
+[in terminal]
+
+awk '{print ">"$1"\n"$2}' eqtlsnp_DNASE_placenta_formatted_40bp_ref.txt > eqtlsnp_DNASE_placenta_formatted_40bp_ref.fasta
+awk '{print ">"$1"\n"$2}' eqtlsnp_DNASE_placenta_formatted_40bp_alt.txt > eqtlsnp_DNASE_placenta_formatted_40bp_alt.fasta
+
+awk '{print ">"$1"\n"$2}' meqtlsnp_DNASE_placenta_formatted_40bp_ref.txt > meqtlsnp_DNASE_placenta_formatted_40bp_ref.fasta
+awk '{print ">"$1"\n"$2}' meqtlsnp_DNASE_placenta_formatted_40bp_alt.txt > meqtlsnp_DNASE_placenta_formatted_40bp_alt.fasta
+
+awk '{print ">"$1"\n"$2}' eqtlsnp_window_DNASE_placenta_formatted_40bp_ref.txt > eqtlsnp_window_DNASE_placenta_formatted_40bp_ref.fasta
+awk '{print ">"$1"\n"$2}' eqtlsnp_window_DNASE_placenta_formatted_40bp_alt.txt > eqtlsnp_window_DNASE_placenta_formatted_40bp_alt.fasta
+
+awk '{print ">"$1"\n"$2}' meqtlsnp_window_DNASE_placenta_formatted_40bp_ref.txt > meqtlsnp_window_DNASE_placenta_formatted_40bp_ref.fasta
+awk '{print ">"$1"\n"$2}' meqtlsnp_window_DNASE_placenta_formatted_40bp_alt.txt > meqtlsnp_window_DNASE_placenta_formatted_40bp_alt.fasta
+
+
+### Run FIMO
+
+module load  MEME/4.11.1/gcc.4.4.7
+
+#'encode.motif_meme_format.txt' file containing the motif position weight matrices
+
+fimo  --thresh 0.001  --oc fimo_ref_mQTL_window 'encode.motif_meme_format.txt' 'meqtlsnp_window_DNASE_placenta_formatted_40bp_ref.fasta'  
+
+fimo --thresh 0.001 --oc fimo_alt_mQTL_window 'encode.motif_meme_format.txt' 'meqtlsnp_window_DNASE_placenta_formatted_40bp_alt.fasta' 
+
+fimo  --thresh 0.001  --oc fimo_ref_eQTL_window 'encode.motif_meme_format.txt' 'eqtlsnp_window_DNASE_placenta_formatted_40bp_ref.fasta'  
+
+fimo --thresh 0.001 --oc fimo_alt_eQTL_window 'encode.motif_meme_format.txt' 'eqtlsnp_window_DNASE_placenta_formatted_40bp_alt.fasta' 
+
+fimo  --thresh 0.05  --oc fimo_ref_mQTL_snp 'encode.motif_meme_format.txt' 'meqtlsnp_DNASE_placenta_formatted_40bp_ref.fasta'  
+
+fimo --thresh 0.05 --oc fimo_alt_mQTL_snp 'encode.motif_meme_format.txt' 'meqtlsnp_DNASE_placenta_formatted_40bp_alt.fasta' 
+
+fimo  --thresh 0.05  --oc fimo_ref_eQTL_snp 'encode.motif_meme_format.txt' 'eqtlsnp_DNASE_placenta_formatted_40bp_ref.fasta'  
+
+fimo --thresh 0.05 --oc fimo_alt_eQTL_snp 'encode.motif_meme_format.txt' 'eqtlsnp_DNASE_placenta_formatted_40bp_alt.fasta' 
+
+
+### I select SNP and TF with changes in binding score as define by FIMO and run atSNP with them, I use the qvalue of binding for the reference allele and change >8 between ref and alt
+
+```{r}
+#eqtl window
+fimo_e_ref=read.table("/home/delahaye/data_from_home/output/PLACENTA/AUGUST_2017/FIMO/fimo_ref_eQTL_window/fimo.txt")
+
+fimo_e_alt=read.table("/home/delahaye/data_from_home/output/PLACENTA/AUGUST_2017/FIMO/fimo_alt_eQTL_window/fimo.txt")
+
+
+fimo_e_ref=data.frame(paste(fimo_e_ref[,1],fimo_e_ref[,2],fimo_e_ref[,3],sep="_"),fimo_e_ref)
+fimo_e_alt=data.frame(paste(fimo_e_alt[,1],fimo_e_alt[,2],fimo_e_alt[,3],sep="_"),fimo_e_alt)
+
+motif=merge(fimo_e_ref,fimo_e_alt,by=1)
+motif=subset(motif,motif[,9]<0.05)
+motif=data.frame(motif,abs(motif[,7])-abs(motif[,16]))
+motif2=subset(motif,abs(motif[,20])>8)
+motif2=data.frame(motif2,do.call(rbind,strsplit(as.character(motif2[,2]),"_")))
+colnames(motif2)=c("id","motif","snp_id","start","stop","strand","score","p-value","q-value","matched_sequence","motif","snp_id","start","stop","strand","score","p-value","q-value","matche_ sequence","score_diff","TF","motif")
+
+write.table(motif2,"/home/delahaye/data_from_home/output/PLACENTA/AUGUST_2017/FIMO/TFBS_eqtl_window_filter.txt",sep="\t",col.names=T,row.names=F,quote=F)
+
+#mqtl window
+fimo_m_ref=read.table("/home/delahaye/data_from_home/output/PLACENTA/AUGUST_2017/FIMO/fimo_ref_mQTL_window/fimo.txt")
+
+fimo_m_alt=read.table("/home/delahaye/data_from_home/output/PLACENTA/AUGUST_2017/FIMO/fimo_alt_mQTL_window/fimo.txt")
+
+
+fimo_m_ref=data.frame(paste(fimo_m_ref[,1],fimo_m_ref[,2],fimo_m_ref[,3],sep="_"),fimo_m_ref)
+fimo_m_alt=data.frame(paste(fimo_m_alt[,1],fimo_m_alt[,2],fimo_m_alt[,3],sep="_"),fimo_m_alt)
+
+motif=merge(fimo_m_ref,fimo_m_alt,by=1)
+motif=subset(motif,motif[,9]<0.05)
+motif=data.frame(motif,abs(motif[,7])-abs(motif[,16]))
+motif2=subset(motif,abs(motif[,20])>8)
+motif2=data.frame(motif2,do.call(rbind,strsplit(as.character(motif2[,2]),"_")))
+colnames(motif2)=c("id","motif","snp_id","start","stop","strand","score","p-value","q-value","matched_sequence","motif","snp_id","start","stop","strand","score","p-value","q-value","matche_ sequence","score_diff","TF","motif")
+
+write.table(motif2,"/home/delahaye/data_from_home/output/PLACENTA/AUGUST_2017/FIMO/TFBS_mqtl_window_filter.txt",sep="\t",col.names=T,row.names=F,quote=F)
+
+#mqtl_snp
+
+fimo_m_ref=read.table("fimo_ref_mQTL_snp/fimo.txt")
+
+fimo_m_alt=read.table("fimo_alt_mQTL_snp/fimo.txt")
+
+
+fimo_m_ref=data.frame(paste(fimo_m_ref[,1],fimo_m_ref[,2],fimo_m_ref[,3],sep="_"),fimo_m_ref)
+fimo_m_alt=data.frame(paste(fimo_m_alt[,1],fimo_m_alt[,2],fimo_m_alt[,3],sep="_"),fimo_m_alt)
+
+motif=merge(fimo_m_ref,fimo_m_alt,by=1)
+motif=subset(motif,motif[,9]<0.05)
+motif=data.frame(motif,abs(motif[,7])-abs(motif[,16]))
+motif2=subset(motif,abs(motif[,20])>8)
+motif2=data.frame(motif2,do.call(rbind,strsplit(as.character(motif2[,2]),"_")))
+colnames(motif2)=c("id","motif","snp_id","start","stop","strand","score","p-value","q-value","matched_sequence","motif","snp_id","start","stop","strand","score","p-value","q-value","matched_sequence","score_diff","TF","motif")
+
+write.table(motif2,"TFBS_mqtl_snp_filter.txt",sep="\t",col.names=T,row.names=F,quote=F)
+
+#eqtl_snp
+
+fimo_e_ref=read.table("fimo_ref_eQTL_snp/fimo.txt")
+
+fimo_e_alt=read.table("fimo_alt_eQTL_snp/fimo.txt")
+
+
+fimo_e_ref=data.frame(paste(fimo_e_ref[,1],fimo_e_ref[,2],fimo_e_ref[,3],sep="_"),fimo_e_ref)
+fimo_e_alt=data.frame(paste(fimo_e_alt[,1],fimo_e_alt[,2],fimo_e_alt[,3],sep="_"),fimo_e_alt)
+
+motif=merge(fimo_e_ref,fimo_e_alt,by=1)
+motif=subset(motif,motif[,9]<0.05)
+motif=data.frame(motif,abs(motif[,7])-abs(motif[,16]))
+motif2=subset(motif,abs(motif[,20])>8)
+motif2=data.frame(motif2,do.call(rbind,strsplit(as.character(motif2[,2]),"_")))
+colnames(motif2)=c("id","motif","snp_id","start","stop","strand","score","p-value","q-value","matched_sequence","motif","snp_id","start","stop","strand","score","p-value","q-value","matched_sequence","score_diff","TF","motif")
+
+write.table(motif2,"TFBS_eqtl_snp_filter.txt",sep="\t",col.names=T,row.names=F,quote=F)
+
+```
+
+###I need to extract, SNP and TF for each group to run atSNP
+
+```{r}
+
+#eqtl_window 
+eq=read.table("TFBS_eqtl_window_filter.txt",header=T,sep="\t")
+
+TF=unique(eq[,21])
+snp_eq_w=data.frame(do.call(rbind,strsplit(as.character(eq[,3]),":")))
+snp_eq_w=data.frame(snp_eq_w[,3],do.call(rbind,strsplit(as.character(snp_eq_w[,4]),"-")),snp_eq_w[,1])
+
+write.table(snp_eq_w,"SNP_TFBS_eqtl_window_filter.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+write.table(TF,"TF_TFBS_eqtl_window_filter.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+#meqtl_window 
+
+eq=read.table("TFBS_mqtl_window_filter.txt",header=T,sep="\t")
+
+TF=unique(eq[,21])
+snp_eq_w=data.frame(do.call(rbind,strsplit(as.character(eq[,3]),":")))
+snp_eq_w=data.frame(snp_eq_w[,3],do.call(rbind,strsplit(as.character(snp_eq_w[,4]),"-")),snp_eq_w[,1])
+
+write.table(snp_eq_w,"SNP_TFBS_mqtl_window_filter.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+write.table(TF,"TF_TFBS_mqtl_window_filter.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+#meqtl_snp
+
+eq=read.table("TFBS_mqtl_snp_filter.txt",header=T,sep="\t")
+
+TF=unique(eq[,21])
+snp_eq_w=data.frame(do.call(rbind,strsplit(as.character(eq[,3]),":")))
+snp_eq_w=data.frame(snp_eq_w[,3],do.call(rbind,strsplit(as.character(snp_eq_w[,4]),"-")),snp_eq_w[,1])
+
+write.table(snp_eq_w,"SNP_TFBS_mqtl_snp_filter.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+write.table(TF,"TF_TFBS_mqtl_snp_filter.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+#eqtl_snp
+
+
+eq=read.table("TFBS_eqtl_snp_filter.txt",header=T,sep="\t")
+
+TF=unique(eq[,21])
+snp_eq_w=data.frame(do.call(rbind,strsplit(as.character(eq[,3]),":")))
+snp_eq_w=data.frame(snp_eq_w[,3],do.call(rbind,strsplit(as.character(snp_eq_w[,4]),"-")),snp_eq_w[,1])
+
+write.table(snp_eq_w,"SNP_TFBS_eqtl_snp_filter.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+write.table(TF,"TF_TFBS_eqtl_snp_filter.txt",sep="\t",col.names=F,row.names=F,quote=F)
+```
+
+
+# I need to create the list of SNP for each conditions 
+
+
+```{r}
+
+mqtl=read.table("meqtlsnp_window_DNASE_placenta.txt",header=T)
+
+eqtl=read.table("eqtlsnp_window_DNASE_placenta.txt",header=T)
+
+mqtl_snp=read.table("~/data_from_home/output/PLACENTA/AUGUST_2017/FIMO/meqtlsnp_DNASE_placenta.txt")
+
+eqtl_snp=read.table("~/data_from_home/output/PLACENTA/AUGUST_2017/FIMO/eqtlsnp_DNASE_placenta.txt")
+
+
+snpwe=read.table("SNP_TFBS_eqtl_window_filter.txt")
+
+snpwme=read.table("SNP_TFBS_mqtl_window_filter.txt")
+
+snpe=read.table("SNP_TFBS_eqtl_snp_filter.txt")
+
+snpm=read.table("SNP_TFBS_mqtl_snp_filter.txt")
+
+
+#I need to create a unique ID to merge file 
+
+mqtl=data.frame(paste(mqtl[,2],mqtl[,3],sep="_"),mqtl)
+eqtl=data.frame(paste(eqtl[,2],eqtl[,3],sep="_"),eqtl)
+mqtl_snp=data.frame(paste(mqtl_snp[,1],mqtl_snp[,2],sep="_"),mqtl_snp[,1:2],mqtl_snp[,4:6])
+eqtl_snp=data.frame(paste(eqtl_snp[,1],eqtl_snp[,2],sep="_"),eqtl_snp[,1:2],eqtl_snp[,4:6])
+
+snpe=data.frame(paste(snpe[,1],snpe[,2],sep="_"),snpe)
+snpm=data.frame(paste(snpm[,1],snpm[,2],sep="_"),snpm)
+snpwe=data.frame(paste(snpwe[,1],snpwe[,2],sep="_"),snpwe)
+snpwme=data.frame(paste(snpwme[,1],snpwme[,2],sep="_"),snpwme)
+
+finale=merge(eqtl_snp,snpe,by=1)
+finalme=merge(mqtl_snp,snpm,by=1)
+finalwe=merge(eqtl,snpwe,by=1)
+finalwme=merge(mqtl,snpwme,by=1)
+
+finalwe=finalwe[,2:6]
+finale=data.frame(finale[,4],finale[,2:3],finale[,5:6])
+finalme=data.frame(finalme[,4],finalme[,2:3],finalme[,5:6])
+finalwme=finalwme[,2:6]
+
+
+finalwe=finalwe[!duplicated(finalwe[,1]),]
+finale=finale[!duplicated(finale[,1]),]
+finalwme=finalwme[!duplicated(finalwme[,1]),]
+finalme=finalme[!duplicated(finalme[,1]),]
+
+colnames(finale)=colnames(finalwe)
+colnames(finalwme)=colnames(finalwe)
+colnames(finalme)=colnames(finalwe)
+
+write.table(finale,"eqtl_snp_filteratsnp.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+write.table(finalwe,"eqtl_window_filteratsnp.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+write.table(finalme,"mqtl_snp_filteratsnp.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+write.table(finalwme,"mqtl_window_filteratsnp.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+TF=read.table("TF_TFBS_eqtl_snp_filter.txt")
+
+'''
+
+### I run atSNP with the subset
+
+```{r}
+
+
+TF=read.table("TF_TFBS_eqtl_snp_filter.txt")
+
+for(i in c(1:length(TF[,1]))){
+x=grep(TF[i,1],names(encode_motif))
+write.table(x,"list_motif_eqtl_snp.txt",col.names=F,row.names=F,sep="\t",append=T)
+}
+
+TF=read.table("TF_TFBS_mqtl_snp_filter.txt")
+
+for(i in c(1:length(TF[,1]))){
+x=grep(TF[i,1],names(encode_motif))
+write.table(x,"list_motif_mqtl_snp.txt",col.names=F,row.names=F,sep="\t",append=T)
+}
+
+
+TF=read.table("TF_TFBS_eqtl_window_filter.txt")
+
+for(i in c(1:length(TF[,1]))){
+x=grep(TF[i,1],names(encode_motif))
+write.table(x,"list_motif_eqtl_window.txt",col.names=F,row.names=F,sep="\t",append=T)
+}
+
+
+TF=read.table("TF_TFBS_mqtl_window_filter.txt")
+
+for(i in c(1:length(TF[,1]))){
+x=grep(TF[i,1],names(encode_motif))
+write.table(x,"list_motif_mqtl_window.txt",col.names=F,row.names=F,sep="\t",append=T)
+}
+
+'''
+
+###Running atSNP 
+
+#!/bin/bash
+#$ -S /bin/bash
+#$ -V
+#$ -N job
+#$ -j y
+#$ -cwd
+#$ -m e
+#$ -M delahaye.fabien84@gmail.com
+#$ -l h_vmem=20g
+#$ -pe smp 10
+
+module load bedtools2/2.24.0/gcc.4.4.7
+module load R/3.4.0/gcc.4.7.4 
+module load gsl/2.4/gcc.4.4.7
+
+R  CMD BATCH --no-restore $1
+
+```{r}
+#eqtl snp
+
+options(stringsAsFactors = F)
+#install.packages("BSgenome.Hsapiens.UCSC.hg19_1.4.0.tar.gz",repos=NULL)
+#install.packages("SNPlocs.Hsapiens.dbSNP.20120608_0.99.11.tar.gz",repos=NULL)
+
+library(atSNP)
+data(encode_library)
+data(encode_motif)
+
+
+snp_info <- LoadSNPData("eqtl_snp_filteratsnp.txt", genome.lib = "BSgenome.Hsapiens.UCSC.hg19",half.window.size = 30, default.par = TRUE, mutation = FALSE)
+
+list=read.table("list_motif_eqtl_snp.txt")
+
+motif=encode_motif[list[,1]]
+
+atsnp.scores <- ComputeMotifScore(motif, snp_info, ncores =10)
+
+score=atsnp.scores$motif.scores[, list(snpid, motif, log_lik_ref,log_lik_snp,log_lik_ratio)]
+
+###compute p.values
+
+atsnp.result <- ComputePValues(motif.lib = motif, snp.info = snp_info,motif.scores = atsnp.scores$motif.scores,ncores = 10)
+
+pv_score=atsnp.result[, list(snpid, motif, pval_ref, pval_snp, pval_rank,pval_diff)]
+
+final=data.frame(score,pv_score)
+
+write.table(final,"TF_score_pv_EQTL_SNP.txt",col.names=T,row.names=F,sep="\t",quote=F)
+
+write.table(score,"TF_score_EQTL_SNP.txt",col.names=T,row.names=F,sep="\t",quote=F)
+
+write.table(pv_score,"TF_pv_EQTL_SNP.txt",col.names=T,row.names=F,sep="\t",quote=F)
+
+
+
+
+#mqtl snp
+
+options(stringsAsFactors = F)
+#install.packages("/gs/gsfs0/users/delahaye/BSgenome.Hsapiens.UCSC.hg19_1.4.0.tar.gz",repos=NULL)
+#install.packages("/gs/gsfs0/users/delahaye/SNPlocs.Hsapiens.dbSNP.20120608_0.99.11.tar.gz",repos=NULL)
+
+library(atSNP)
+data(encode_library)
+data(encode_motif)
+
+
+data=read.table("mqtl_snp_filteratsnp.txt",header=T)
+data=data[-which(nchar(data[,4])>1 | nchar(data[,5])>1 ),]
+x=split(data,rep(1:33,each=5))
+
+for(i in c(1:17)){
+print(i)
+
+write.table(x[[i]],"temp_mqtl_snp_filteratsnp.txt",col.names=T,row.names=F,quote=F)
+
+snp_info <- LoadSNPData("temp_mqtl_snp_filteratsnp.txt", genome.lib = "BSgenome.Hsapiens.UCSC.hg19",half.window.size = 30, default.par = TRUE, mutation = FALSE)
+
+list=read.table("list_motif_mqtl_snp.txt")
+
+motif=encode_motif[list[,1]]
+
+atsnp.scores <- ComputeMotifScore(motif, snp_info, ncores =10)
+
+score=atsnp.scores$motif.scores[, list(snpid, motif, log_lik_ref,log_lik_snp,log_lik_ratio)]
+
+###compute p.values
+
+atsnp.result <- ComputePValues(motif.lib = motif, snp.info = snp_info,motif.scores = atsnp.scores$motif.scores,ncores = 10)
+
+pv_score=atsnp.result[, list(snpid, motif, pval_ref, pval_snp, pval_rank,pval_diff)]
+
+final=data.frame(score,pv_score)
+
+
+
+write.table(final,paste("",i,"TF_score_pv_MQTL_SNP.txt",sep=""),col.names=T,row.names=F,sep="\t",quote=F)
+
+write.table(score,paste("",i,"TF_score_MQTL_SNP.txt",sep=""),col.names=T,row.names=F,sep="\t",quote=F)
+
+write.table(pv_score,paste("",i,"TF_pv_MQTL_SNP.txt",sep=""),col.names=T,row.names=F,sep="\t",quote=F)
+
+rm(final)
+rm(score)
+rm(pv_score)
+rm(atsnp.result)
+rm(atsnp.scores)
+gc()
+}
+
+
+#####
+
+
+#mqtl window
+
+options(stringsAsFactors=F)
+#install.packages("/gs/gsfs0/users/delahaye/BSgenome.Hsapiens.UCSC.hg19_1.4.0.tar.gz",repos=NULL)
+#install.packages("/gs/gsfs0/users/delahaye/SNPlocs.Hsapiens.dbSNP.20120608_0.99.11.tar.gz",repos=NULL)
+
+library(atSNP)
+data(encode_library)
+data(encode_motif)
+
+
+data=read.table("mqtl_window_filteratsnp.txt",header=T)
+
+data=data[-which(nchar(data[,4])>1 | nchar(data[,5])>1 ),]
+
+x=split(data,rep(1:8,each=5))
+
+for(i in c(4:8)){
+print(i)
+
+write.table(x[[i]],"temp_mqtl_window_filteratsnp.txt",col.names=T,row.names=F,quote=F)
+
+snp_info <- LoadSNPData("temp_mqtl_window_filteratsnp.txt", genome.lib = "BSgenome.Hsapiens.UCSC.hg19",half.window.size = 30, default.par = TRUE, mutation = FALSE)
+
+list=read.table("list_motif_mqtl_window.txt")
+
+motif=encode_motif[list[,1]]
+
+atsnp.scores <- ComputeMotifScore(motif, snp_info, ncores =8)
+
+score=atsnp.scores$motif.scores[, list(snpid, motif, log_lik_ref,log_lik_snp,log_lik_ratio)]
+
+###compute p.values
+
+atsnp.result <- ComputePValues(motif.lib = motif, snp.info = snp_info,motif.scores = atsnp.scores$motif.scores,ncores = 10)
+
+pv_score=atsnp.result[, list(snpid, motif, pval_ref, pval_snp, pval_rank,pval_diff)]
+
+final=data.frame(score,pv_score)
+
+
+write.table(final,paste("",i,"TF_score_pv_MQTL_window.txt",sep=""),col.names=T,row.names=F,sep="\t",quote=F)
+
+write.table(score,paste("",i,"TF_score_MQTL_window.txt",sep=""),col.names=T,row.names=F,sep="\t",quote=F)
+
+write.table(pv_score,paste("",i,"TF_pv_MQTL_window.txt",sep=""),col.names=T,row.names=F,sep="\t",quote=F)
+
+rm(final)
+rm(score)
+rm(pv_score)
+rm(atsnp.result)
+rm(atsnp.scores)
+gc()
+}
+
+
+#####
+
+
+#eqtlwindow
+
+options(stringsAsFactors = F)
+#install.packages("/gs/gsfs0/users/delahaye/BSgenome.Hsapiens.UCSC.hg19_1.4.0.tar.gz",repos=NULL)
+#install.packages("/gs/gsfs0/users/delahaye/SNPlocs.Hsapiens.dbSNP.20120608_0.99.11.tar.gz",repos=NULL)
+
+library(atSNP)
+data(encode_library)
+data(encode_motif)
+
+
+data=read.table("eqtl_window_filteratsnp.txt",header=T)
+
+data=data[-which(nchar(data[,4])>1 | nchar(data[,5])>1 ),]
+
+x=split(data,rep(1:15,each=10))
+
+for(i in c(1:15)){
+print(i)
+
+write.table(x[[i]],"temp_eqtl_window_filteratsnp.txt",col.names=T,row.names=F,quote=F)
+
+snp_info <- LoadSNPData("temp_eqtl_window_filteratsnp.txt", genome.lib = "BSgenome.Hsapiens.UCSC.hg19",half.window.size = 30, default.par = TRUE, mutation = FALSE)
+
+list=read.table("list_motif_eqtl_window.txt")
+
+motif=encode_motif[list[,1]]
+
+atsnp.scores <- ComputeMotifScore(motif, snp_info, ncores =10)
+
+score=atsnp.scores$motif.scores[, list(snpid, motif, log_lik_ref,log_lik_snp,log_lik_ratio)]
+
+###compute p.values
+
+atsnp.result <- ComputePValues(motif.lib = motif, snp.info = snp_info,motif.scores = atsnp.scores$motif.scores,ncores = 10)
+
+pv_score=atsnp.result[, list(snpid, motif, pval_ref, pval_snp, pval_rank,pval_diff)]
+
+final=data.frame(score,pv_score)
+
+
+write.table(final,paste("",i,"TF_score_pv_EQTL_window.txt",sep=""),col.names=T,row.names=F,sep="\t",quote=F)
+
+write.table(score,paste("",i,"TF_score_EQTL_window.txt",sep=""),col.names=T,row.names=F,sep="\t",quote=F)
+
+write.table(pv_score,paste("",i,"TF_pv_EQTL_window.txt",sep=""),col.names=T,row.names=F,sep="\t",quote=F)
+
+rm(final)
+rm(score)
+rm(pv_score)
+rm(atsnp.result)
+rm(atsnp.scores)
+gc()
+}
+```
+
+### I need to combine FIMO and atSNP output files. I will do it for window and snp approach. 
+
+```{r}
+
+options(stringsAsFactors=F)
+
+atsnp=read.table("atsnp_output.txt",header=T,sep="\t")
+
+fimo=read.table("FIMO_output.txt",header=T,sep="\t")
+
+#I need to create a matching ID between the 2 files. 
+
+atsnp=data.frame(paste(do.call(rbind,strsplit(as.character(atsnp[,3]),"::"))[,1],atsnp[,2],sep="_"),atsnp[,1],atsnp[,6:9],atsnp[,15:18],atsnp[,20:22])
+
+fimo=data.frame(paste(fimo[,1],fimo[,2],sep="_"),fimo[,3:5],fimo[,8:11])
+
+#merge the 2 file using the unique ID
+
+final=merge(atsnp,fimo,by=1)
+
+#select for significant alteration using pvalue rank as recommended by the atSNP manual
+
+s=subset(final,final$pval_rank<0.05)
+s=data.frame(paste(s[,1],s[,3],sep="_"),s)
+s=s[!duplicated(s[,1]),]
+
+write.table(s[,-1],"final_table_TFBS.txt",col.names=T,row.names=F,sep="\t",quote=F)
+
+#repeat that for each conditions.

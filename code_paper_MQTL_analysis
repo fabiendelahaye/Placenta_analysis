@@ -1,0 +1,451 @@
+---
+title: "Analysis of mQTL"
+output:
+  pdf_document: default
+  html_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+###I need to select of qtl after permutations#### 
+
+```{r}
+options(stringsAsFactors=F)
+
+mqtl=read.table("mqtl_perms_full.txt",header=F)
+
+colnames(mqtl)=c("CpGID","chr","start","stop","strand","n_variant_tested","dist","SNPID","chr_snp","start_snp","stop_snp","DF","Dummy","1st_parameter_beta","2nd_parameter_beta","nominal_PV","regression_slope","adj_PV","adj_PV_num")
+```
+
+###I need to adjust pvalue-FDR###
+
+```{r}
+FDRmq=data.frame(mqtl,p.adjust(mqtl[,19],method="fdr"))
+```
+
+###select for FDR<5%
+
+```{r}
+
+sigmq=FDRmq[which(FDRmq[,20]<=0.05),]
+
+write.table(sigmq,"mqtlsig.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+'''
+
+##I need to select for genotype cut-off and methylation cut-of##
+
+```{r}
+
+methylation=read.table("methylation_mqtl.txt")
+
+genotype=read.table("genotype_mqtl.txt")
+
+snp=unique(mqtl[,8])
+genotype=merge(snp,genotype,by.x=1,by.y=2)
+```
+
+###count number of sample by genotype for each SNP because I have 303 sample the cutoff is at least 15 by genotype.
+
+```{r}
+
+a=as.matrix(genotype[,7:309])
+number=matrix(ncol=3,nrow=nrow(genotype))
+for(i in c(1:nrow(genotype))){
+number[i,]=table(t(a[i,]))[1:3]}
+
+number=data.frame(genotype[,1],number)
+
+low=matrix(ncol=1,nrow=nrow(number))
+for (i in c(1:nrow(number))){
+low[i,]=min(number[i,2:4])}
+
+number=data.frame(number,low)
+
+mqtl_geno=merge(mqtl,genotype,by.x=8,by.y=1)
+
+mqtl_geno_num=merge(mqtl_geno,number,by=1)
+
+mqtl_geno_num_meth=merge(mqtl_geno_num,methylation,by.x=2,by.y=4)
+
+select_mqtl=mqtl_geno_num_meth[which(mqtl_geno_num_meth[,332]>14),]
+
+
+write.table(select_mqtl,"MQTL_filternumber_geno_expression.txt",sep="\t",col.names=T,row.names=F,quote=F)
+
+```
+
+###I create a score for each association as describe in the manuscript 
+
+```{r}
+score=(1-select_mqtl[,20])*abs(select_mqtl[,17])/log(abs(select_mqtl[,8])+2)
+
+select_mqtl=data.frame(select_mqtl,score)
+
+select_mqtl=select_mqtl[order(-select_mqtl[,195]),]
+
+```
+### I filter my dataset for score >0.05
+
+```{r}
+
+mqtl2=subset(select_mqtl,select_mqtl[,17]>=0.05)
+
+colnames(mqtl2)=c("geneID","chr","start","stop","strand","n_variant_tested","dist","SNPID","chr_snp","start_snp","stop_snp","DF","Dummy","1st_parameter_beta","2nd_parameter_beta","nominal_PV","regression_slope","adj_PV","adj_PV_num","gene_name","score")
+
+write.table(mqtl2,"MQTL_filternumber_geno_expression_score.txt",sep="\t",col.names=T,row.names=F,quote=F)
+```
+
+#### I need to create a list of probe at risk 
+
+#I need to create the map for each probe
+```{r}
+refill=read.csv("list_probe_450K_01112017.csv") #from illumina 450K
+
+#split by type of probe
+one=subset(refill,refill[,5]=="I")
+two=subset(refill,refill[,5]=="II")
+
+#split by strand
+oneF=subset(one,one[,4]=="F")
+oneR=subset(one,one[,4]=="R")
+
+twoF=subset(two,two[,4]=="F")
+twoR=subset(two,two[,4]=="R")
+
+#generate coordinate for each probe
+
+oneF=data.frame(paste("chr",oneF[,2],sep=""),oneF[,3]-1,oneF[,3]+50,oneF[,1],oneF[,4])
+oneR=data.frame(paste("chr",oneR[,2],sep=""),oneR[,3]-50,oneR[,3]+1,oneR[,1],oneR[,4])
+
+twoF=data.frame(paste("chr",twoF[,2],sep=""),twoF[,3],twoF[,3]+50,twoF[,1],twoF[,4])
+twoR=data.frame(paste("chr",twoR[,2],sep=""),twoR[,3]-50,twoR[,3],twoR[,1],twoR[,4])
+
+colnames(oneF)=colnames(oneR)
+colnames(twoF)=colnames(oneR)
+colnames(twoR)=colnames(oneR)
+
+finalprobe=rbind(oneF,oneR,twoF,twoR)
+
+write.table(finalprobe,"map_450K.txt",sep="\t",col.names=F,row.names=F)
+```
+
+# I need to collect SNP overlapping with probes
+
+```{r}
+
+bed1=read.table("list_MAF0.01_phase3_REF_040317.txt",sep="\t",header=T) #from 1000 genomes project
+bed2=read.table("map_450K.txt",header=F)
+
+bedTools.2in<-function(functionstring="/public/apps/bedtools2/2.24.0/gcc.4.4.7/bin/intersectBed",bed1,bed2,opt.string="")
+{
+  #create temp files
+  a.file=tempfile()
+  b.file=tempfile()
+  out   =tempfile()
+  options(scipen =99) # not to use scientific notation when writing out
+ 
+  #write bed formatted dataframes to tempfile
+  write.table(bed1,file=a.file,quote=F,sep="\t",col.names=F,row.names=F)
+  write.table(bed2,file=b.file,quote=F,sep="\t",col.names=F,row.names=F)
+ 
+  # create the command string and call the command using system()
+  command=paste(functionstring,"-a",a.file,"-b",b.file,opt.string,">",out,sep=" ")
+  cat(command,"\n")
+  try(system(command))
+ 
+  res=read.table(out,header=F)
+  unlink(a.file);unlink(b.file);unlink(out)
+  return(res)
+}
+
+
+bed1=data.frame(paste("chr",bed1[,1],sep=""),as.numeric(bed1[,2])-1,as.numeric(bed1[,2])+1,bed1[,3:5])
+bed2=data.frame(paste("chr",bed2[,1],sep=""),bed2[,-1])
+
+inter=bedTools.2in(bed1=bed1,bed2=bed2,opt.string="-wa -wb")
+final=data.frame(inter[,7:10],inter[,4:6],inter[,2]+1,inter[,11])
+
+FOR=subset(final,final[,9]=="F")
+REV=subset(final,final[,9]=="R")
+
+FOR=data.frame(FOR,FOR[,8]-FOR[,2])
+REV=data.frame(REV,REV[,3]-REV[,8])
+
+colnames(REV)=colnames(FOR)
+
+final=rbind(REV,FOR)
+
+write.table(final,"list450_probe_SNP_dist.txt",sep="\t",col.names=F,row.names=F,quote=F)
+```
+
+# I need to exclude C/T SNPs as they will not affec the binding considering strand information
+
+x=final[which(final[,11]>2),] # I only focus on SNP that do not overlap with the interrogated SNP
+
+
+xf=subset(x,x[,9]=="F")
+x2=xf[which(xf[,6]=="C" & xf[,7]=="T" | xf[,7]=="C" & xf[,6]=="T"),]
+
+xr=subset(x,x[,9]=="R")
+x3=xr[which(xr[,6]=="G" & xr[,7]=="A" | xr[,7]=="G" & xr[,6]=="A"),]
+
+final=data.frame(final,paste(final[,1],final[,5],sep="_"))
+x2=data.frame(x2,paste(x2[,1],x2[,5],sep="_"))
+x3=data.frame(x3,paste(x3[,1],x3[,5],sep="_"))
+
+p=which(final[,12]%in%x2[,12])
+p2=which(final[,12]%in%x3[,12])
+
+finalprobe=final[-p,]
+finalprobe=finalprobe[-p2,]
+
+write.table(finalprobe,"list450_probe_SNP_CT",sep="\t",col.names=F,row.names=F,quote=F)
+```
+
+#I used this list to exclude associations from further analysis, I also exclude SNP overlaping directly with CpGs  and associations with probe previously identified as cross-reactive probes [Chen et al.]
+
+
+### I look at enrichment using permutation
+
+### Looking at enrichment based on level of methylation
+
+```{r}
+mqtl=read.table("mQTL_filternumber_geno_methylation_score.txt",header=T)
+
+rank=read.table("rank_methylation_102816.txt")
+
+rankmqtl=merge(rank,mqtl[,21],by=1)
+
+y=data.frame(table(rankmqtl[,3]))
+
+write.table(y,"rank_MQTL_placenta_090517.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+for (i in c(1:1000)) { 
+x=sample(1:nrow(rank),nrow(rankmqtl),replace=F)
+a=rank[x,]
+y=data.frame(table(a[,3]))
+write.table(y,"rank_PERM_MQTL_placenta_090517.txt",quote=F,sep="\t",col.names=F,row.names=F,append=T)
+}
+
+### Looking at enrichment based on feature previously identified using ChromHMM 
+
+I run this analysis based on CpG and based on SNP coordinates.
+
+```{r}
+mqtl=read.table("MQTL_filternumber_geno_methylation_score.txt",header=T)
+
+feature=read.table("placenta_feature_chromHMM.bed")
+
+#the function below call bedTools intersect within R
+bedTools.2in<-function(functionstring="/public/apps/bedtools2/2.24.0/gcc.4.4.7/bin/intersectBed",bed1,bed2,opt.string="")
+{
+  #create temp files
+  a.file=tempfile()
+  b.file=tempfile()
+  out   =tempfile()
+  options(scipen =99) # not to use scientific notation when writing out
+ 
+  #write bed formatted dataframes to tempfile
+  write.table(bed1,file=a.file,quote=F,sep="\t",col.names=F,row.names=F)
+  write.table(bed2,file=b.file,quote=F,sep="\t",col.names=F,row.names=F)
+ 
+  # create the command string and call the command using system()
+  command=paste(functionstring,"-a",a.file,"-b",b.file,opt.string,">",out,sep=" ")
+  cat(command,"\n")
+  try(system(command))
+ 
+  res=read.table(out,header=F)
+  unlink(a.file);unlink(b.file);unlink(out)
+  return(res)
+}
+
+
+snpmap=read.table("ref_snp.txt",header=T) #list of SNP interrogated by Illumina Omni 2.5
+
+snpref=data.frame(paste("chr",snpmap[,2],sep=""),snpmap[,3],snpmap[,3]+2,snpmap[,1])
+
+
+all=bedTools.2in(bed1=feature,bed2=snpref,opt.string="-wa -wb")
+
+inter=bedTools.2in(bed1=feature,bed2=data.frame(paste("chr",mqtl[,9],sep=""),mqtl[,10],mqtl[,10]+2,mqtl[,2]),opt.string="-wa -wb")
+
+y=data.frame(table(inter[,4]))
+
+write.table(y,"feature_MQTL_SNP.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+write.table(all,"feature_ALL_SNP.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+
+for (i in (1:1000)) { 
+x=sample(1:nrow(all),nrow(inter),replace=F)
+z=all[x,]
+final=data.frame(table(z[,4]))
+write.table(final,"feature_PERM_MQTL_SNP.txt",quote=F,sep="\t",col.names=F,row.names=F,append=T)
+}
+```
+
+### Looking at enrichment based on annotation from Refseq 
+
+```{r}
+mqtl=read.table("MQTL_filternumber_geno_expression_score.txt",header=T)
+
+annotation=read.table("~/data_from_home/output/PLACENTA/SNP/MATRIX_092016/annotation_refseq_111016.txt")
+
+
+all2=bedTools.2in(bed1=annotation,bed2=snpref,opt.string="-wa -wb")
+
+inter2=bedTools.2in(bed1=annotation,bed2=data.frame(paste("chr",mqtl[,9],sep=""),mqtl[,10],mqtl[,10]+2,mqtl[,2]),opt.string="-wa -wb")
+
+y2=data.frame(table(inter2[,4]))
+
+write.table(all2,"annotation_ALL_SNP",sep="\t",col.names=F,row.names=F,quote=F)
+
+
+write.table(y2,"annotation_MQTL_SNP.txt",sep="\t",col.names=F,row.names=F,quote=F)
+
+
+for (i in (1:1000)) { 
+x=sample(1:nrow(all2),nrow(inter2),replace=F)
+z2=all2[x,]
+final2=data.frame(table(z2[,4]))
+write.table(final2,"annotation_PERM_EQTL_SNP.txt",quote=F,sep="\t",col.names=F,row.names=F,append=T)
+}
+```
+### I generated a list of CpG associated genes using bedtools closest function
+
+```{r}
+mqtl=read.table("MQTL_filternumber_geno_methylation_score.txt",header=T)
+list_cpg=data.frame(mqtl[,3],mqtl[,4:5],mqtl[,1])
+write.table(list_cpg,"listcpg_for_nearest.txt")
+```
+
+bedtools sort -i listcpg_for_nearest.txt > listcpg_for_nearest_sorted.txt
+
+
+
+bedtools closest -a listcpg_for_nearest_sorted.txt -b  refseq_042817_sorted.txt > nearest_gene_meqtl_110917_sorted.txt
+
+#refseq_042817_sorted.txt is a file with refseq coordinates for each gene 
+
+```{r}
+
+gene_close=read.table("nearest_gene_meqtl_110917_sorted.txt")
+final=merge(mqtl,gene_cole,by.x=1,by.y=4,all.x=T)
+
+write.table(final,"MQTL_filternumber_geno_methylation_score_gene.txt",sep="\t",col.names=T,row.names=F,quote=F)
+
+### Looking at overlap with GWAS database
+
+
+#tranform mqtl using lift from hg19 to hg38
+```{r}
+mqtl=read.table("MQTL_filternumber_geno_methylation_score_gene.txt",header=T)
+snp_lift=data.frame(paste("chr",mqtl[,9],sep=""),mqtl[,10],mqtl[,10]+2,mqtl[,2])
+write.table(snp_lift,"Fro_Lift_mqtl.txt",sep="\t",col.names=F,row.names=F,quote=F)
+```
+#reading in the transform files and overlapping with gwas
+
+```{r}
+m_lift=read.table("~/Downloads/hglft_genome_67f4_999d70.bed")
+gwas=read.csv("/placenta/analysis_2016/small2_GWAS_snpREF.csv")
+gwas=data.frame(paste("chr",gwas[,5],sep=""),gwas[,6],gwas[,6]+1,paste(gwas[,8],gwas[,9],sep="_"),gwas[,8:9],gwas[,1],gwas[,10])
+
+mgwas=bedTools.2in(bed1=m_lift,bed2=gwas[,1:3],opt.string="-wa -wb")
+list=unique(mgwas[,4])
+mgwas=merge(list,gwas,by.x=1,by.y=6)
+
+gene=data.frame(mqtl[,2],mqtl[,1],mqtl[,22])
+
+mgwas=merge(mgwas,gene,by=1,all.x=T)
+colnames(mgwas)=c("SNP","chr","start","stop","gwas_asso","gene_gwas","study","PMID","Refseq","gene_mQTL")
+
+write.table(mgwas,"mQTl_gwas_summary.txt",sep="\t",col.names=T,row.names=F,quote=F)
+
+```
+
+### Gene set enrichment analysis using Goseq and KEGG database
+
+```{r}
+
+library(goseq) #load goseq package
+source("http://bioconductor.org/biocLite.R")
+biocLite("geneLenDataBase")
+library("geneLenDataBase")
+
+mqtl=read.table("MQTL_filternumber_geno_methylation_score_gene.txt",header=T)
+
+data(hg19.refGene.LENGTH)
+
+list=hg19.refGene.LENGTH #file with the length of each gene
+
+LOI=unique(meqtl[,18])
+
+probe=read.table("/R/list/Illumina_450K_ref_numberprobe_110916.txt")#file containing the number of probe by genes to replace the length information.
+probe=probe[!duplicated(probe[,1]),]
+probe=merge(list,probe,by.x=2,by.y=1)
+probe=data.frame(probe[,2],probe[,1],probe[,4])
+
+list=probe
+list=list[which(!duplicated(list[,2])),]
+a=list
+a=cbind(a[,2],rep(0,nrow(a)))
+
+name=read.table("/R/list/refseq_hg19_gene_names.txt")
+LOI=merge(LOI,name[,5:6],by.x=1,by.y=2)
+LOI=LOI[!duplicated(LOI[,1]),]
+b=which(a[,1]%in%LOI[,2])
+a[b,2]<-1
+x=as.vector(a[,2])
+x=as.numeric(x)
+
+names(x)<-list[,2]
+
+
+pwf=nullp(x,'h19','refGene',bias.data=list[,3])
+
+biocLite("org.Hs.eg.db")
+library("org.Hs.eg.db")
+
+
+en2eg = as.list(org.Hs.egREFSEQ2EG)
+eg2kegg = as.list(org.Hs.egPATH)
+grepKEGG = function(id, mapkeys) {
+unique(unlist(mapkeys[id], use.names = FALSE))
+}
+kegg = lapply(en2eg, grepKEGG, eg2kegg)
+
+pathKEGGe=goseq(pwf,"hg19","refGene",gene2cat=kegg,test.cats=c("KEGG"))
+
+```
+
+#Creating the final matrix including pathway names, refseqID and gene names.
+
+'''{r}
+
+xx <- as.list(org.Hs.egPATH2EG)
+
+pathKEGGe=subset(pathKEGGe,pathKEGGe[,2]<=0.05)
+
+tableR=mat.or.vec(22,43) #22 correspond to significant pathways and 43 to the maximun number of gene in one pathway
+
+for (i in c(1:22)){
+print(i)
+tableR[i,]=c(unique(list2[which(list2[,2]%in%xx[[pathKEGGe[i,1]]]),4]),(rep(0,(43-(length(unique(list2[which(list2[,2]%in%xx[[pathKEGGe[i,1]]]),4])))))))}
+
+source("http://bioconductor.org/biocLite.R")
+biocLite("KEGG.db")
+library(KEGG.db)
+
+pathR<- as.list(KEGGPATHNAME2ID)
+
+
+testpathR=apply(as.matrix(pathKEGGe),1,function(each){return(names(pathR[pathR%in%each]))})
+a<- data.frame(matrix(unlist(testpathR), nrow=22, byrow=T))
+
+
+finalKEGG=data.frame(pathKEGGe,a,tableR)
+
+
+write.table(finalKEGG,"pathKEGG_mQTL.txt",sep="\t",col.names=F,row.names=F,quote=F)
+'''

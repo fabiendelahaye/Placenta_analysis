@@ -1,0 +1,216 @@
+---
+title: "Data preprocessing & QC"
+output:
+  pdf_document: default
+  html_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+###Ancestral background PCA plot
+
+I download data from 100 genome to run PCA as they are from illumina as well. [ALL.chip.omni_broad_sanger_combined.20140818.snps.genotypes.vcf.gz]
+I need to create a .ped file from the vcf and transform all SNPs on positive strand. 
+
+[terminal]
+
+module load plink/1.07/gcc.4.4.7
+plink --file plink_1000_genome --flip listsnptoflip_Illumina.txt --recode --out flipplink_1000_genome
+
+
+I need to create the genotype file 
+
+vi par.PED.EIGENSTRAT
+
+genotypename:    flipplink_1000_genome.ped 
+snpname:         flipplink_1000_genome.map 
+indivname:       flipplink_1000_genome.ped 
+outputformat:    EIGENSTRAT
+genotypeoutname: data_1000_genome.eigenstratgeno
+snpoutname:      data_1000_genome.snp
+indivoutname:    data_1000_genome.ind
+familynames:     NO
+
+
+###I use mergeit to merge file after flipping placenta data 
+
+
+module load eigensoft/6.0.1 
+mergeit -p parfile
+
+geno1: placenta_cohort.eigenstratgeno 
+snp1:  placenta_cohort.snp 
+ind1:  placenta_cohort.ind 
+geno2: data_1000_genome.eigenstratgeno
+snp2:  data_1000_genome.snp
+ind2:  data_1000_genome.ind
+genooutfilename:   mergeit_1000_placenta.eigenstratgeno 
+snpoutfilename:    mergeit_1000_placenta.snp
+indoutfilename:    mergeit_1000_placenta.ind
+
+
+###run pca analysis using mergeit data 
+
+module load eigensoft/6.0.1
+smartpca.perl -i mergeit_1000_placenta.eigenstratgeno  -a mergeit_1000_placenta.snp -b dmergeit_1000_placenta.ind -o data_1000_genome.pca -p data_1000_genome.plot -l data_1000_genome.log -e data_1000_genome.eval -m 0
+
+
+
+
+####create the plot 
+
+```{r}
+individu=read.table("data_1000_genome.ind") #from 1000 genome project
+ethnicity=read.csv("ethnicity_1000genome.csv")#from 1000 genome project
+sample=read.table("placenta_cohort.ind")
+m=merge(individu,ethnicity,by=1)
+ethnicity=data.frame(m[,1],m[,4])
+x=data.frame(sample[,1],"sample")
+colnames(x)=colnames(race)
+legend=rbind(ethnicity,x)
+
+library(colorRamps)
+col=primary.colors(23,steps=3,no.white=TRUE)
+palette(col)
+
+t=table(legend[,2])
+t2=data.frame(colnames(t),t)
+t3=data.frame(t2[,1],c(1:22))
+legend2=merge(legend,t3,all.x=T,by.x=2,by.y=1)
+leg=data.frame(legend2,abs(legend2[,3]-20))
+leg=data.frame(leg[,2],leg[,1],leg[,4])
+```
+
+###Expression data needed to be normalized, I quantile normalized and log transformed them. 
+
+```{r}
+exp=read.table("expression_dataset.txt",header=T)
+
+library(preprocessCore)
+
+q=normalize.quantiles(as.matrix(exp[,-1]))
+qlog=log2(q+1)
+final=data.frame(exp[,1],qlog)
+write.table(final,"expression_dataset_qlog.txt",sep="\t",col.names=T,row.names=F,quote=F)
+
+
+###PEER analysis on expression data
+
+```{r}
+library(peer)
+expr=read.table("expression_dataset_qlog.txt", header=TRUE)
+expr=na.omit(expr)
+expr=t(expr[,-1])
+model = PEER()
+PEER_setPhenoMean(model,as.matrix(expr))
+dim(PEER_getPhenoMean(model))
+PEER_setNk(model,10)
+PEER_getNk(model)
+PEER_update(model)
+factors = PEER_getX(model)
+weights = PEER_getW(model)
+precision = PEER_getAlpha(model)
+residuals = PEER_getResiduals(model)
+
+write.table(factors,"PEER_factors.txt",sep="\t",row.names=F,col.names=F,quote=F)
+```
+
+###PCA analysis
+
+I run similar code for both expression dataset and methylation dataset. For expression the input was the quantile normalized, log transform dataset. 
+
+```{r}
+
+pca=prcomp(t(data))
+pca=data.frame(pcaexp$x[,1:2])
+write.table(pca,"PCA_output.txt",sep="\t",quote=F,col.names=T,row.names=F)
+
+```
+
+I then assigned pvalue to 10 first principal component based on different cohort information available for our sample (Birth Weight (BW), Gestational age (GEST), Ethnicity (RACE), Eclempsia status (ECL), Mode of delivery (DEL),mode of labor (LAB), gender (GENDER), plate (PLATE)). Significance of each cofounder was assessed using linear regression. 
+
+```{r}
+
+batch=read.table("batch_info.txt",sep="\t",header=T)
+
+
+pca=pcame$x
+
+BW.p<-c()
+for (i in seq(1:10)){
+BW<-batch[,3] #refers to the column in the batch_info matrix with birth weight information
+BW<-lm(pca[,i]~BW)
+BW.p<-c(BW.p, anova(BW)$Pr[1])
+}
+
+GEST.p<-c()
+for (i in seq(1:10)){
+GEST<-batch[,6]
+GEST<-lm(pca[,i]~GEST)
+GEST.p<-c(GEST.p, anova(GEST)$Pr[1])
+}
+
+RACE.p<-c()
+for (i in seq(1:10)){
+RACE<-batch[,7]
+RACE<-lm(pca[,i]~RACE)
+RACE.p<-c(RACE.p, anova(RACE)$Pr[1])
+}
+
+ECL.p<-c()
+for (i in seq(1:10)){
+ECL<-batch[,8]
+ECL<-lm(pca[,i]~ECL)
+ECL.p<-c(ECL.p, anova(ECL)$Pr[1])
+}
+
+DEL.p<-c()
+for (i in seq(1:10)){
+DEL<-batch[,9]
+DEL<-lm(pca[,i]~DEL)
+DEL.p<-c(DEL.p, anova(DEL)$Pr[1])
+}
+
+LAB.p<-c()
+for (i in seq(1:10)){
+LAB<-batch[,10]
+LAB<-lm(pca[,i]~LAB)
+LAB.p<-c(LAB.p, anova(LAB)$Pr[1])
+}
+
+GENDER.p<-c()
+for (i in seq(1:10)){
+GENDER<-batch[,4]
+GENDER<-lm(pca[,i]~GENDER)
+GENDER.p<-c(GENDER.p, anova(GENDER)$Pr[1])
+}
+
+
+PLATE.p<-c()
+for (i in seq(1:10)){
+PLATE<-batch[,13]
+PLATE<-lm(pca[,i]~PLATE)
+PLATE.p<-c(PLATE.p, anova(PLATE)$Pr[1])
+}
+
+
+
+pvals.raw<-rbind(BW.p,GEST.p,ECL.p,DEL.p,LAB.p,RACE.p,GENDER.p,PLATE.p)
+pvals.raw<-data.matrix(pvals.raw)
+rownames(pvals.raw)<-colnames(batch[,c(3,6:9,10,4,13)])
+
+pv2=pvals.raw
+pv2[which(pv2>0.05)]<-1 #here I basicaly put them to 1 if less than 0.05 useful for color coding later
+logpvals.raw<--log10(pv2)
+
+#to generate the heatmap with color coded significance for each of the 10 principal component
+
+library(gplots)
+library(RColorBrewer)
+
+logpvals.raw<--log10(pvals.raw)
+hmcol2<-colorRampPalette(brewer.pal(9,"Blues"))(256)
+
+heatmap.2(logpvals.raw,Rowv=F,Colv=colnames(pvals.raw),dendrogram='none',trace='none',margins=c(8,8),col=hmcol2,colsep=c(1:9),rowsep=c(1:9),sepwidth=c(0.05,0.025),cexRow=.5)
+
+```

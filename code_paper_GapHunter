@@ -1,0 +1,59 @@
+---
+title: "Gap-Hunter Analysis"
+output:
+  pdf_document: default
+  html_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+#####GAP HUNTING #####
+Gap-hunter was used to identify at risk probes without using SNP database reference. 
+
+
+```{r}
+source("https://bioconductor.org/biocLite.R")
+biocLite("minfi")
+library(minfi)
+
+data=read.table("methylation.txt",header=T)
+
+x=as.matrix(data[,-1])
+rownames(x)=data[,1]
+
+x1=x[1:100000,]
+x2=x[100001:200000,]
+x3=x[200001:300000,]
+x4=x[300001:400000,]
+x5=x[400001:485577,]
+
+gap1=gaphunter(x1,threshold=0.05, keepOutliers=FALSE, outCutoff=0.01, verbose=TRUE)
+gap2=gaphunter(x2,threshold=0.05, keepOutliers=FALSE, outCutoff=0.01, verbose=TRUE)
+gap3=gaphunter(x3,threshold=0.05, keepOutliers=FALSE, outCutoff=0.01, verbose=TRUE)
+gap4=gaphunter(x4,threshold=0.05, keepOutliers=FALSE, outCutoff=0.01, verbose=TRUE)
+gap5=gaphunter(x5,threshold=0.05, keepOutliers=FALSE, outCutoff=0.01, verbose=TRUE)
+
+
+final1=gap1[[1]]
+final2=gap2[[1]]
+final3=gap3[[1]]
+final4=gap4[[1]]
+final5=gap5[[1]]
+
+final1=data.frame(final1,"null")
+final2=data.frame(final2,"null","null")
+final3=data.frame(final3,"null")
+final5=data.frame(final5,"null")
+
+colnames(final1)=colnames(final4)
+colnames(final2)=colnames(final4)
+colnames(final3)=colnames(final4)
+colnames(final5)=colnames(final4)
+
+final=rbind(final1,final2,final3,final4,final5)
+final=data.frame(rownames(final),final)
+
+write.table(final,"gaphunter_nooutlier_list_020217.txt",quote=F,sep="\t",row.names=F,col.names=F)
+```
+
+

@@ -1,0 +1,140 @@
+
+"Identification of eQTL and mQTL using QTLtool"
+
+
+###data pre-processing
+
+
+#I need to recode the lgen file into a PED file which assume that I have a '.lgen',a '.fam' file and a '.map' file (see plink manual).
+
+[in terminal]
+module load plink/1.07/gcc.4.4.7
+
+plink --lfile genotype --recode --out PED_genotype --map3 --missing-genotype - --noweb --allow-no-sex
+
+
+#I need to filter the SNP based on MAF,HWE and quality of the genotyping. 
+
+[in terminal]
+module load plink/1.07/gcc.4.4.7
+plink --file PED_genotype --recode --out plink_genotype  --missing-genotype - --noweb --allow-no-sex  --mind 0.05 --geno 0.95 --maf 0.05 --hwe 0.001
+
+#I need to create a vcf file 
+
+[in terminal]
+module load plink/1.07/gcc.4.4.7
+plink --file plink_genotype --recode vcf-iid --out VCF_plink_genotype --noweb --allow-no-sex -missing-genotype -
+
+#I need to create a tabix file 
+
+[in terminal]
+module load htslib/1.2.1/gcc.4.4.7 
+
+bgzip VCF_plink_genotype.vcf
+tabix -p vcf VCF_plink_genotype.vcf.gz
+
+#I need to format and sort the expression, methylation and covariante files
+
+[in terminal]
+module load bedtools2/2.26.0/gcc.4.4.717.txt
+
+bedtools sort -i expression.txt > sorted_expression.txt
+
+bedtools sort -i methylation.txt > sorted_methylation.txt
+
+
+gunzip sorted_expression.txt.gz
+gunzip covariates.txt.gz
+gunzip sorted_methylation.txt.gz
+
+tabix -p bed sorted_expression.txt.gz
+tabix -p bed sorted_methylation.txt.gz
+
+
+### use QTLtool to identify eQTL/mQTL 
+
+#EQTL
+[in terminal]
+for j in $(seq 1 200);
+do
+qsub -S /bin/bash -N eQTL_${j}_chunk_perm -cwd -R y -l h_vmem=5.6G -j y << EOF
+module load QTLtools/1.1/gcc.4.7.4
+QTLtools cis --vcf VCF_plink_genotype_.vcf.gz --bed sorted_expression.txt.gz --cov covariates.txt.gz --permute 1000  --chunk $j 200 --out perms_norm_$j\_200.txt --window 1000000 --seed 123456
+EOF
+done
+
+
+#mQTL
+[in terminal]
+for j in $(seq 1 200);
+do
+qsub -S /bin/bash -N mQTL_${j}_chunk_perm -cwd -R y -l h_vmem=5.6G -j y << EOF
+module load QTLtools/1.1/gcc.4.7.4
+QTLtools cis --vcf VCF_plink_genotype.vcf.gz --bed sorted_methylation.txt.gz --permute 1000  --chunk $j 200 --out perms_norm_$j\_200.txt --window 150000 --seed 123456
+EOF
+done
+
+##########
+The columns are:
+1. The phenotype ID
+2. The chromosome ID of the phenotype
+3. The start position of the phenotype
+4. The end position of the phenotype
+5. The strand orientation of the phenotype
+6. The total number of variants tested in cis
+7. The distance between the phenotype and the tested variant (accounting for strand orientation)
+8. The ID of the top variant
+9. The chromosome ID of the top variant
+10. The start position of the top variant
+11. The end position of the top variant
+12. The number of degrees of freedom used to compute the P-values
+13. Dummy
+14. The first parameter value of the fitted beta distribution
+15. The second parameter value of the fitted beta distribution (it also gives the effective number of independent tests in the region)
+16. The nominal P-value of association between the phenotype and the top variant in cis
+17. The corresponding regression slope
+18. The P-value of association adjusted for the number of variants tested in cis given by the direct method (i.e. empirircal P-value)
+19. The P-value of association adjusted for the number of variants tested in cis given by the fitted beta distribution. We strongly recommend to use this adjusted P-value in any downstream analysis
+#########
+
+#I need to combine all permutations 
+
+[in terminal]
+cat perms_*200.txt > eqtl_perms_full.txt
+cat perms_*200.txt > mqtl_perms_full.txt
+
+
+#I need to create a genotype file 
+
+
+#I need to replace "-" by 0 
+
+[in terminal]
+sed 's~-~0~g' plink_genotype_eqtl.ped > 2_plink_genotype_eqtl.ped
+
+sed 's~-~0~g' plink_genotype_mqtl.ped > 2_plink_genotype_mqtl.ped
+
+
+module load eigensoft/6.0.1 
+convertf  -p par.PED.EIGENSTRAT 
+
+#par.PED.EIGENSTRAT
+genotypename:    2_plink_genotype_eqtl.ped 
+snpname:         plink_genotype_eqtl.map 
+indivname:       plink_genotype_eqtl.ped  
+outputformat:    EIGENSTRAT
+genotypeoutname: plink_genotype_eqtl.eigenstratgeno
+snpoutname:      plink_genotype_eqtl.snp
+indivoutname:    plink_genotype_eqtl.ind
+familynames:     NO
+
+
+genotypename:    2_plink_genotype_mqtl.ped 
+snpname:         plink_genotype_mqtl.map 
+indivname:       plink_genotype_mqtl.ped  
+outputformat:    EIGENSTRAT
+genotypeoutname: plink_genotype_mqtl.eigenstratgeno
+snpoutname:      plink_genotype_mqtl.snp
+indivoutname:    plink_genotype_mqtl.ind
+familynames:     NO
+
